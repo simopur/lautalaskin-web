@@ -12,12 +12,11 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     lauta_leveys = 100 
     vali = 10 
     
-    # Saumojen kerääminen vain tekstin lihavointia varten
     kaikki_saumat = set(malli_a['saumat'])
     if malli_b:
         kaikki_saumat.update(malli_b['saumat'])
     
-    # Piirretään trukkinostojen pystyviivat VAIN kevyinä apuviivoina (grid)
+    # Piirretään trukkinostojen pystyviivat taustalle
     for n in nostot:
         ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
     
@@ -27,30 +26,25 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
         current_x = 0
         
         for j, pala in enumerate(jako['palat']):
-            # Piirretään itse lauta
             rect = patches.Rectangle((current_x, y_pos), pala, lauta_leveys, 
                                      linewidth=0.5, edgecolor='black', 
                                      facecolor=colors[i % 2], alpha=0.8)
             ax.add_patch(rect)
             
-            # Pituusteksti
             if pala > 800:
                 ax.text(current_x + pala/2, y_pos + lauta_leveys/2, f"{int(pala)}", 
                         ha='center', va='center', color='white', fontsize=7, fontweight='bold')
             
             current_x += pala
             
-            # Piirretään saumaviiva VAIN TÄMÄN LAUDAN kohdalle
             if j < len(jako['palat']) - 1:
                 ax.plot([current_x, current_x], [y_pos, y_pos + lauta_leveys], 
-                        color='black', linewidth=2.5) # Hieman paksumpi saumaviiva
+                        color='black', linewidth=2.5)
 
     ax.set_xlim(-200, ulkopituus + 200)
     ax.set_ylim(-50, 5 * (lauta_leveys + vali) + 50)
     ax.set_aspect('equal')
-    ax.set_title("Visualisointi: Lautakohtaiset saumat (Lihavoidut luvut = sauma jollakin linjalla)", fontsize=10)
     
-    # Nostojen paikkojen merkintä ja lihavointi
     ax.set_xticks(nostot)
     labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     
@@ -62,13 +56,12 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     ax.set_yticks([(lauta_leveys/2) + i*(lauta_leveys+vali) for i in range(5)])
     ax.set_yticklabels(["A", "B", "A", "B", "A"], fontsize=8)
     
-    # Poistetaan akselien kehykset
     for spine in ax.spines.values():
         spine.set_visible(False)
     
     st.pyplot(fig)
 
-# --- LASKENTALAGIIKKA (Sama kuin v2.2) ---
+# --- APUFUNKTIOT ---
 def tulosta_st(nimi, palat, saumat):
     st.subheader(nimi)
     st.write(f"**Kappaleita:** {len(palat)} kpl")
@@ -90,8 +83,8 @@ def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     return loydetyt
 
 # --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Lautalaskin v2.7", layout="wide")
-st.title("📦 Lautalaatikon Jakolaskin v2.7")
+st.set_page_config(page_title="Lautalaskin v2.8", layout="wide")
+st.title("📦 Lautalaatikon Jakolaskin v2.8")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -103,13 +96,25 @@ with col2:
     tn_m = st.number_input("tn määrä kpl", value=13, step=1)
 
 if st.button("Laske lautajako", type="primary"):
+    # 1. Trukkinostojen laskenta ja symmetriatarkistus
     nostot = [int(tn_e + (i * tn_v)) for i in range(tn_m) if (int(tn_e + (i * tn_v))) < ulp_p]
+    
+    if nostot:
+        vali_alussa = nostot[0]
+        vali_lopussa = ulp_p - nostot[-1]
+        valit_keskella = [nostot[i+1] - nostot[i] for i in range(len(nostot)-1)]
+        
+        # Tarkistetaan onko alku- ja loppuväli sama ja onko välit keskellä symmetriset
+        if abs(vali_alussa - vali_lopussa) > 1 or valit_keskella != valit_keskella[::-1]:
+            st.warning("⚠️ Jako ei symmetrinen!")
+
+    # 2. Reittien etsintä
     all_p = [0] + nostot + [int(ulp_p)]
     sallitut = list(range(2, len(all_p) - 2))
     reitti_idat = etsi_reitit(0, [0], m_l, all_p, sallitut)
 
     if not reitti_idat:
-        st.warning("Jakoa ei löytynyt.")
+        st.error("Jakoa ei löytynyt näillä asetuksilla.")
     else:
         valmiit = []
         for r in reitti_idat:
@@ -122,6 +127,7 @@ if st.button("Laske lautajako", type="primary"):
         m_a = valmiit[0]
         m_b = None
         
+        # Peilikuva-tarkistus
         rev_palat = m_a['palat'][::-1]
         rev_saumat = []
         cur = 0
@@ -158,10 +164,12 @@ if st.button("Laske lautajako", type="primary"):
                         safe = False; break
                 if safe: m_b = ehdokas; break
 
-        st.success("Laskenta valmis!")
-        piirra_lautajako(m_a, m_b, ulp_p, nostot)
-        
-        c1, c2 = st.columns(2)
-        with c1: tulosta_st("MALLI A (Pohja)", m_a['palat'], m_a['saumat'])
-        with c2: 
-            if m_b: tulosta_st("MALLI B (Sivut / Porrastettu)", m_b['palat'], m_b['saumat'])
+        # 3. Lopputuloksen näyttäminen tai virheilmoitus
+        if not m_b:
+            st.error("Lisää yksi trukkinosto tai käytä pidempää lautaa, jako ei mahdollinen.")
+        else:
+            st.success("Laskenta valmis!")
+            piirra_lautajako(m_a, m_b, ulp_p, nostot)
+            c1, c2 = st.columns(2)
+            with c1: tulosta_st("MALLI A (Pohja)", m_a['palat'], m_a['saumat'])
+            with c2: tulosta_st("MALLI B (Sivut / Porrastettu)", m_b['palat'], m_b['saumat'])
