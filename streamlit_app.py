@@ -4,7 +4,6 @@ import matplotlib.patches as patches
 
 # --- VISUALISOINTI ---
 def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
-    # Leveä ja matala kuva mittakaavassa
     fig, ax = plt.subplots(figsize=(12, 3)) 
     
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
@@ -13,44 +12,51 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     lauta_leveys = 100 
     vali = 10 
     
-    # Piirretään trukkinostojen pystyviivat (taustalle)
+    # Kerätään kaikki saumakohdat molemmista malleista korostusta varten
+    kaikki_saumat = set(malli_a['saumat'])
+    if malli_b:
+        kaikki_saumat.update(malli_b['saumat'])
+    
+    # Piirretään trukkinostojen pystyviivat
     for n in nostot:
-        ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
+        is_sauma = n in kaikki_saumat
+        ax.axvline(x=n, color='gray' if not is_sauma else 'black', 
+                   linestyle='--' if not is_sauma else '-', 
+                   linewidth=0.8 if not is_sauma else 1.2, alpha=0.6)
     
     for i, jako in enumerate(jaot):
         if not jako: continue
-        
         y_pos = i * (lauta_leveys + vali)
         current_x = 0
-        palat = jako['palat']
-        
-        for j, pala in enumerate(palat):
+        for j, pala in enumerate(jako['palat']):
             rect = patches.Rectangle((current_x, y_pos), pala, lauta_leveys, 
                                      linewidth=0.5, edgecolor='black', 
                                      facecolor=colors[i % 2], alpha=0.8)
             ax.add_patch(rect)
-            
             if pala > 800:
                 ax.text(current_x + pala/2, y_pos + lauta_leveys/2, f"{int(pala)}", 
                         ha='center', va='center', color='white', fontsize=7, fontweight='bold')
-            
             current_x += pala
-            
-            if j < len(palat) - 1:
+            if j < len(jako['palat']) - 1:
                 ax.plot([current_x, current_x], [y_pos, y_pos + lauta_leveys], 
                         color='black', linewidth=1.5)
 
     ax.set_xlim(-200, ulkopituus + 200)
     ax.set_ylim(-50, 5 * (lauta_leveys + vali) + 50)
     ax.set_aspect('equal')
+    ax.set_title("Visualisointi: Lihavoidut luvut alhaalla osoittavat saumapaikat", fontsize=10)
     
-    ax.set_title(f"Visualisointi: Saumojen sijoittuminen suhteessa trukkinostoihin", fontsize=10)
-    
-    # Asetetaan x-akselin merkinnöiksi trukkinostojen paikat
+    # Asetetaan x-akselin merkinnät ja lihavoidaan saumakohdat
     ax.set_xticks(nostot)
-    ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
-    ax.set_xlabel("Trukkinostojen kohdat (mm)", fontsize=8)
+    labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     
+    for i, n in enumerate(nostot):
+        if n in kaikki_saumat:
+            labels[i].set_fontweight('bold')
+            labels[i].set_fontsize(8)
+            labels[i].set_color('black')
+
+    ax.set_xlabel("Trukkinostojen kohdat (mm)", fontsize=8)
     ax.set_yticks([(lauta_leveys/2) + i*(lauta_leveys+vali) for i in range(5)])
     ax.set_yticklabels(["A", "B", "A", "B", "A"], fontsize=8)
     ax.spines['top'].set_visible(False)
@@ -71,7 +77,6 @@ def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     if etaisyys_loppuun <= max_l:
         if n_idx != len(pisteet) - 2:
             return [reitti + [len(pisteet)-1]]
-    
     loydetyt = []
     for s_idx in sallitut:
         if s_idx <= n_idx: continue
@@ -82,8 +87,8 @@ def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     return loydetyt
 
 # --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Lautalaskin v2.5", layout="wide")
-st.title("📦 Lautalaatikon Jakolaskin v2.5")
+st.set_page_config(page_title="Lautalaskin v2.6", layout="wide")
+st.title("📦 Lautalaatikon Jakolaskin v2.6")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -114,7 +119,6 @@ if st.button("Laske lautajako", type="primary"):
         m_a = valmiit[0]
         m_b = None
         
-        # Peilikuva-tarkistus
         rev_palat = m_a['palat'][::-1]
         rev_saumat = []
         cur = 0
@@ -152,8 +156,6 @@ if st.button("Laske lautajako", type="primary"):
                 if safe: m_b = ehdokas; break
 
         st.success("Laskenta valmis!")
-        
-        # Piirretään kuva trukkinostojen tiedoilla
         piirra_lautajako(m_a, m_b, ulp_p, nostot)
         
         c1, c2 = st.columns(2)
