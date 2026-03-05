@@ -12,60 +12,63 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     lauta_leveys = 100 
     vali = 10 
     
-    # Kerätään kaikki saumakohdat molemmista malleista korostusta varten
+    # Saumojen kerääminen vain tekstin lihavointia varten
     kaikki_saumat = set(malli_a['saumat'])
     if malli_b:
         kaikki_saumat.update(malli_b['saumat'])
     
-    # Piirretään trukkinostojen pystyviivat
+    # Piirretään trukkinostojen pystyviivat VAIN kevyinä apuviivoina (grid)
     for n in nostot:
-        is_sauma = n in kaikki_saumat
-        ax.axvline(x=n, color='gray' if not is_sauma else 'black', 
-                   linestyle='--' if not is_sauma else '-', 
-                   linewidth=0.8 if not is_sauma else 1.2, alpha=0.6)
+        ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
     
     for i, jako in enumerate(jaot):
         if not jako: continue
         y_pos = i * (lauta_leveys + vali)
         current_x = 0
+        
         for j, pala in enumerate(jako['palat']):
+            # Piirretään itse lauta
             rect = patches.Rectangle((current_x, y_pos), pala, lauta_leveys, 
                                      linewidth=0.5, edgecolor='black', 
                                      facecolor=colors[i % 2], alpha=0.8)
             ax.add_patch(rect)
+            
+            # Pituusteksti
             if pala > 800:
                 ax.text(current_x + pala/2, y_pos + lauta_leveys/2, f"{int(pala)}", 
                         ha='center', va='center', color='white', fontsize=7, fontweight='bold')
+            
             current_x += pala
+            
+            # Piirretään saumaviiva VAIN TÄMÄN LAUDAN kohdalle
             if j < len(jako['palat']) - 1:
                 ax.plot([current_x, current_x], [y_pos, y_pos + lauta_leveys], 
-                        color='black', linewidth=1.5)
+                        color='black', linewidth=2.5) # Hieman paksumpi saumaviiva
 
     ax.set_xlim(-200, ulkopituus + 200)
     ax.set_ylim(-50, 5 * (lauta_leveys + vali) + 50)
     ax.set_aspect('equal')
-    ax.set_title("Visualisointi: Lihavoidut luvut alhaalla osoittavat saumapaikat", fontsize=10)
+    ax.set_title("Visualisointi: Lautakohtaiset saumat (Lihavoidut luvut = sauma jollakin linjalla)", fontsize=10)
     
-    # Asetetaan x-akselin merkinnät ja lihavoidaan saumakohdat
+    # Nostojen paikkojen merkintä ja lihavointi
     ax.set_xticks(nostot)
     labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     
     for i, n in enumerate(nostot):
         if n in kaikki_saumat:
             labels[i].set_fontweight('bold')
-            labels[i].set_fontsize(8)
             labels[i].set_color('black')
 
-    ax.set_xlabel("Trukkinostojen kohdat (mm)", fontsize=8)
     ax.set_yticks([(lauta_leveys/2) + i*(lauta_leveys+vali) for i in range(5)])
     ax.set_yticklabels(["A", "B", "A", "B", "A"], fontsize=8)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_visible(False)
+    
+    # Poistetaan akselien kehykset
+    for spine in ax.spines.values():
+        spine.set_visible(False)
     
     st.pyplot(fig)
 
-# --- LASKENTALAGIIKKA (Ennallaan v2.2) ---
+# --- LASKENTALAGIIKKA (Sama kuin v2.2) ---
 def tulosta_st(nimi, palat, saumat):
     st.subheader(nimi)
     st.write(f"**Kappaleita:** {len(palat)} kpl")
@@ -87,8 +90,8 @@ def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     return loydetyt
 
 # --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Lautalaskin v2.6", layout="wide")
-st.title("📦 Lautalaatikon Jakolaskin v2.6")
+st.set_page_config(page_title="Lautalaskin v2.7", layout="wide")
+st.title("📦 Lautalaatikon Jakolaskin v2.7")
 
 col1, col2 = st.columns(2)
 with col1:
