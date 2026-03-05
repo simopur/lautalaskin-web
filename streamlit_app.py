@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 # --- SYÖTTÖKENTTIEN HALLINTA ---
-# Määritellään oletusarvot
 DEFAULTS = {
     "f_max_l": 3900, "f_ulp": 12110, "f_tne": 295, "f_tnv": 960, "f_tnm": 13,
     "j_jalas_p": 12000, "j_lauta_p": 4500, "j_kerrokset": 3
@@ -13,7 +12,6 @@ def tyhjenna_kentat():
     for key in DEFAULTS:
         st.session_state[key] = DEFAULTS[key]
 
-# Alustetaan session_state, jos sitä ei ole
 for key, val in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -31,15 +29,15 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     for i, jako in enumerate(jaot):
         if not jako: continue
         y_pos = i * (l_w + v)
-        curr_x = 0
+        cx = 0
         for j, pala in enumerate(jako['palat']):
-            rect = patches.Rectangle((curr_x, y_pos), pala, l_w, linewidth=0.5, edgecolor='black', facecolor=colors[i % 2], alpha=0.8)
+            rect = patches.Rectangle((cx, y_pos), pala, l_w, linewidth=0.5, edgecolor='black', facecolor=colors[i % 2], alpha=0.8)
             ax.add_patch(rect)
             if pala > 800:
-                ax.text(curr_x + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', color='white', fontsize=7, fontweight='bold')
-            curr_x += pala
+                ax.text(cx + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', color='white', fontsize=7, fontweight='bold')
+            cx += pala
             if j < len(jako['palat']) - 1:
-                ax.plot([curr_x, current_x := curr_x], [y_pos, y_pos + l_w], color='black', linewidth=2.5)
+                ax.plot([cx, cx], [y_pos, y_pos + l_w], color='black', linewidth=2.5)
     ax.set_xlim(-200, ulkopituus + 200); ax.set_ylim(-50, 5 * (l_w + v) + 50); ax.set_aspect('equal')
     ax.set_xticks(nostot); labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     for i, n in enumerate(nostot):
@@ -49,9 +47,9 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     st.pyplot(fig)
 
 # --- VISUALISOINTI: JALAKSET ---
-def piirra_jalasjako(kerrokset_data, kokonaispituus):
-    fig, ax = plt.subplots(figsize=(12, 2 + len(kerrokset_data)*0.5))
-    colors = ['#8e44ad', '#2980b9', '#27ae60', '#f1c40f']
+def piirra_jalasjako(kerrokset_data, kokonaispituus, title):
+    fig, ax = plt.subplots(figsize=(12, 1.5 + len(kerrokset_data)*0.4))
+    colors = ['#8e44ad', '#2980b9', '#27ae60', '#f1c40f', '#e74c3c']
     l_h, v = 100, 15
     for i, kerros in enumerate(kerrokset_data):
         y_pos = i * (l_h + v)
@@ -64,13 +62,42 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus):
             cx += p
             if j < len(kerros) - 1:
                 ax.plot([cx, cx], [y_pos, y_pos + l_h], color='black', linewidth=3)
-    ax.set_xlim(-100, kokonaispituus + 100); ax.set_ylim(-50, len(kerrokset_data)*(l_h+v) + 20); ax.set_aspect('equal')
+    ax.set_xlim(-100, kokonaispituus + 100); ax.set_ylim(-20, len(kerrokset_data)*(l_h+v) + 20); ax.set_aspect('equal')
+    ax.set_title(title, fontsize=10, fontweight='bold')
     ax.set_yticks([(l_h/2) + i*(l_h+v) for i in range(len(kerrokset_data))])
-    ax.set_yticklabels([f"Kerros {i+1}" for i in range(len(kerrokset_data))])
+    ax.set_yticklabels([f"K{i+1}" for i in range(len(kerrokset_data))], fontsize=8)
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- LASKENTALAGIIKKA ---
+# --- LASKENTA-APUFUNKTIOT ---
+def laske_jalas_kerrokset(j_p, j_l, kerrokset, alku_offset_tyyppi="syklinen"):
+    data, saumat = [], []
+    step = j_l / kerrokset
+    for k in range(int(kerrokset)):
+        pala_lista, sauma_lista = [], []
+        # Syklinen vs Puolikas-aloitus
+        if alku_offset_tyyppi == "puolikas":
+            offset = ( (j_l/2) + (k * step) ) % j_l
+        else:
+            offset = (k * step) % j_l
+            
+        curr = 0
+        if offset > 0:
+            pala_lista.append(int(offset)); curr += offset; sauma_lista.append(curr)
+        while curr + j_l < j_p:
+            pala_lista.append(int(j_l)); curr += j_l; sauma_lista.append(curr)
+        if j_p - curr > 0:
+            pala_lista.append(int(j_p - curr))
+        data.append(pala_lista); saumat.append(sauma_lista)
+    
+    min_v = float('inf')
+    for i in range(len(saumat)):
+        for j in range(i + 1, len(saumat)):
+            for s1 in saumat[i]:
+                for s2 in saumat[j]:
+                    min_v = min(min_v, abs(s1 - s2))
+    return data, int(min_v)
+
 def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     dist = pisteet[-1] - pisteet[n_idx]
     if dist <= max_l:
@@ -105,8 +132,8 @@ def yrita_laskea_pari(m_l, all_p, sallitut):
     return m_a, m_b
 
 # --- PÄÄOHJELMA ---
-st.set_page_config(page_title="Pakkauslaskin v3.1", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v3.1")
+st.set_page_config(page_title="Pakkauslaskin v3.2", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v3.2")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kentat):
     st.rerun()
@@ -128,9 +155,7 @@ with tab1:
         nostot = [int(f_tne + (i * f_tnv)) for i in range(int(f_tnm)) if (int(f_tne + (i * f_tnv))) < f_ulp]
         all_p = [0] + nostot + [int(f_ulp)]
         sallitut = list(range(2, len(all_p) - 2))
-        
         if nostot and abs(nostot[0] - (f_ulp - nostot[-1])) > 1: st.warning("⚠️ Jako ei symmetrinen!")
-        
         m_a, m_b = yrita_laskea_pari(f_max_l, all_p, sallitut)
         if m_a and m_b:
             st.success("Laskenta valmis!")
@@ -138,8 +163,7 @@ with tab1:
             colA, colB = st.columns(2)
             with colA: st.info(f"**MALLI A**\n\n{len(m_a['palat'])} kpl: {' + '.join(map(str, m_a['palat']))} mm")
             with colB: st.info(f"**MALLI B**\n\n{len(m_b['palat'])} kpl: {' + '.join(map(str, m_b['palat']))} mm")
-        else:
-            st.error("Jako ei mahdollinen. Käytä pidempää lautaa.")
+        else: st.error("Jako ei mahdollinen.")
 
 with tab2:
     st.header("Jalas-laskenta")
@@ -154,35 +178,25 @@ with tab2:
         if j_l >= j_p:
             st.info("Jalas voidaan tehdä yhdestä puusta.")
         else:
-            kerrokset_data = []
-            kaikki_saumapaikat = []
-            offset_step = j_l / j_k
+            # VAIHTOEHTO 1: SYKLINEN OPTIMI
+            d1, v1 = laske_jalas_kerrokset(j_p, j_l, j_k, "syklinen")
+            # VAIHTOEHTO 2: PUOLIKAS-ALOITUS
+            d2, v2 = laske_jalas_kerrokset(j_p, j_l, j_k, "puolikas")
             
-            for k in range(int(j_k)):
-                k_palat = []
-                k_saumat = []
-                offset = (k * offset_step) % j_l
-                curr = 0
-                if offset > 0:
-                    k_palat.append(int(offset)); curr += offset; k_saumat.append(curr)
-                while curr + j_l < j_p:
-                    k_palat.append(int(j_l)); curr += j_l; k_saumat.append(curr)
-                loppu = j_p - curr
-                if loppu > 0: k_palat.append(int(loppu))
-                
-                kerrokset_data.append(k_palat)
-                kaikki_saumapaikat.append(k_saumat)
+            st.subheader("Vaihtoehto 1: Matemaattinen optimi")
+            st.write(f"Pienin saumojen väli: **{v1} mm**")
+            piirra_jalasjako(d1, j_p, "Syklinen porrastus")
             
-            # Lasketaan pienin väli saumojen välillä
-            min_vali = float('inf')
-            for i in range(len(kaikki_saumapaikat)):
-                for j in range(i + 1, len(kaikki_saumapaikat)):
-                    for s1 in kaikki_saumapaikat[i]:
-                        for s2 in kaikki_saumapaikat[j]:
-                            vali = abs(s1 - s2)
-                            if vali < min_vali: min_vali = vali
+            st.divider()
             
-            st.success(f"Jalasten jako valmis. Pienin saumojen väli kerrosten välillä: **{int(min_vali)} mm**")
-            piirra_jalasjako(kerrokset_data, j_p)
-            for i, kd in enumerate(kerrokset_data):
-                st.write(f"**Kerros {i+1}:** {' + '.join(map(str, kd))} mm")
+            st.subheader("Vaihtoehto 2: Sahaajan suosikki (Puolikas-aloitus)")
+            st.write(f"Pienin saumojen väli: **{v2} mm**")
+            piirra_jalasjako(d2, j_p, f"Aloitus puolikkaalla ({int(j_l/2)} mm)")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**V1 kerrokset:**")
+                for i, row in enumerate(d1): st.text(f"K{i+1}: {' + '.join(map(str, row))}")
+            with col2:
+                st.write("**V2 kerrokset:**")
+                for i, row in enumerate(d2): st.text(f"K{i+1}: {' + '.join(map(str, row))}")
