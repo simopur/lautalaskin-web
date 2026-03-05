@@ -3,17 +3,19 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 # --- VISUALISOINTI ---
-def piirra_lautajako(malli_a, malli_b, ulkopituus):
-    # Säädetään figsize niin, että korkeus pysyy maltillisena (n. 15cm näytöllä)
-    # 12 metriä vs 500mm on suhde 24:1. Leveä ja matala kuva on paras.
+def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
+    # Leveä ja matala kuva mittakaavassa
     fig, ax = plt.subplots(figsize=(12, 3)) 
     
-    # 5 lautaa rinnakkain (vuorotellen A, B, A, B, A)
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
-    colors = ['#e67e22', '#d35400'] # Puun sävyjä
+    colors = ['#e67e22', '#d35400']
     
-    lauta_leveys = 100 # mm
-    vali = 10 # mm rako visualisoinnin selkeyttämiseksi
+    lauta_leveys = 100 
+    vali = 10 
+    
+    # Piirretään trukkinostojen pystyviivat (taustalle)
+    for n in nostot:
+        ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.8, alpha=0.5)
     
     for i, jako in enumerate(jaot):
         if not jako: continue
@@ -23,35 +25,32 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus):
         palat = jako['palat']
         
         for j, pala in enumerate(palat):
-            # Piirretään lauta mittakaavassa (korkeus 100mm)
             rect = patches.Rectangle((current_x, y_pos), pala, lauta_leveys, 
                                      linewidth=0.5, edgecolor='black', 
                                      facecolor=colors[i % 2], alpha=0.8)
             ax.add_patch(rect)
             
-            # Lisätään pituuslukema vain, jos se mahtuu (esim. > 800mm)
             if pala > 800:
                 ax.text(current_x + pala/2, y_pos + lauta_leveys/2, f"{int(pala)}", 
                         ha='center', va='center', color='white', fontsize=7, fontweight='bold')
             
             current_x += pala
             
-            # Saumaviiva
             if j < len(palat) - 1:
                 ax.plot([current_x, current_x], [y_pos, y_pos + lauta_leveys], 
                         color='black', linewidth=1.5)
 
-    # Asetetaan akselit mittakaavaan
     ax.set_xlim(-200, ulkopituus + 200)
     ax.set_ylim(-50, 5 * (lauta_leveys + vali) + 50)
-    
-    # TÄRKEÄ: Pitää mittasuhteet oikeina (1mm x = 1mm y)
     ax.set_aspect('equal')
     
-    ax.set_title(f"Visualisointi: 100mm laudat rinnakkain (Pituus {int(ulp_p)} mm)", fontsize=10)
-    ax.set_xlabel("Pituus (mm)", fontsize=8)
+    ax.set_title(f"Visualisointi: Saumojen sijoittuminen suhteessa trukkinostoihin", fontsize=10)
     
-    # Siistitään ulkoasua
+    # Asetetaan x-akselin merkinnöiksi trukkinostojen paikat
+    ax.set_xticks(nostot)
+    ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
+    ax.set_xlabel("Trukkinostojen kohdat (mm)", fontsize=8)
+    
     ax.set_yticks([(lauta_leveys/2) + i*(lauta_leveys+vali) for i in range(5)])
     ax.set_yticklabels(["A", "B", "A", "B", "A"], fontsize=8)
     ax.spines['top'].set_visible(False)
@@ -83,8 +82,8 @@ def etsi_reitit(n_idx, reitti, max_l, pisteet, sallitut):
     return loydetyt
 
 # --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Lautalaskin v2.4", layout="wide") # Leveä tila parempi kuvalle
-st.title("📦 Lautalaatikon Jakolaskin v2.4")
+st.set_page_config(page_title="Lautalaskin v2.5", layout="wide")
+st.title("📦 Lautalaatikon Jakolaskin v2.5")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -115,7 +114,7 @@ if st.button("Laske lautajako", type="primary"):
         m_a = valmiit[0]
         m_b = None
         
-        # Peilikuva-tarkistus (kuten v2.2)
+        # Peilikuva-tarkistus
         rev_palat = m_a['palat'][::-1]
         rev_saumat = []
         cur = 0
@@ -154,8 +153,8 @@ if st.button("Laske lautajako", type="primary"):
 
         st.success("Laskenta valmis!")
         
-        # Piirretään kuva mittakaavassa
-        piirra_lautajako(m_a, m_b, ulp_p)
+        # Piirretään kuva trukkinostojen tiedoilla
+        piirra_lautajako(m_a, m_b, ulp_p, nostot)
         
         c1, c2 = st.columns(2)
         with c1: tulosta_st("MALLI A (Pohja)", m_a['palat'], m_a['saumat'])
