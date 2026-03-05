@@ -5,8 +5,8 @@ import math
 
 # --- SYÖTTÖKENTTIEN HALLINTA ---
 DEFAULTS = {
-    "f_max_l": 3900, "f_ulp": 12110, "f_tne": 295, "f_tnv": 960, "f_tnm": 13, "f_min_v": 0,
-    "j_jalas_p": 10000, "j_lauta_p": 4000, "j_kerrokset": 3, "j_min_v": 0
+    "f_max_l": 3900, "f_ulp": 12110, "f_tne": 295, "f_tnv": 960, "f_tnm": 13,
+    "j_jalas_p": 10000, "j_lauta_p": 4000, "j_kerrokset": 3
 }
 
 def tyhjenna_kaikki():
@@ -18,13 +18,12 @@ for key, val in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- VISUALISOINTI: LATTIAPOHJA ---
+# --- VISUALISOINTI: LATTIAPOHJA (Palautettu v2.9) ---
 def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     fig, ax = plt.subplots(figsize=(12, 3)) 
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
     colors = ['#e67e22', '#d35400']
     l_w, v = 100, 10 
-    
     kaikki_s = set(malli_a['saumat'])
     if malli_b: kaikki_s.update(malli_b['saumat'])
     
@@ -75,8 +74,8 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus, title, min_v):
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- LATTIA-LASKENTALAGIIKKA ---
-def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut, nostot):
+# --- LASKENTALAGIIKKA: LATTIAPOHJA (Palautettu v2.9) ---
+def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut):
     dist = pisteet[-1] - pisteet[n_idx]
     if dist <= max_l:
         if n_idx != len(pisteet) - 2: return [reitti + [len(pisteet)-1]]
@@ -84,139 +83,132 @@ def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut, nostot):
     for s_idx in sallitut:
         if s_idx <= n_idx: continue
         pala = pisteet[s_idx] - pisteet[n_idx]
-        if pala <= max_l:
-            if s_idx - n_idx >= 2: # Ei vierekkäisiä saumoja
-                t = etsi_reitit_f(s_idx, reitti + [s_idx], max_l, pisteet, sallitut, nostot)
-                if t: res.extend(t)
+        if pala <= max_l and s_idx - n_idx >= 2:
+            t = etsi_reitit_f(s_idx, reitti + [s_idx], max_l, pisteet, sallitut)
+            if t: res.extend(t)
     return res
 
-def yrita_laskea_pari_f(m_l, all_p, sallitut, nostot):
-    reitit = etsi_reitit_f(0, [0], m_l, all_p, sallitut, nostot)
+def yrita_laskea_pari_f(m_l, all_p, sallitut):
+    reitit = etsi_reitit_f(0, [0], m_l, all_p, sallitut)
     if not reitit: return None, None
     valmiit = []
     for r in reitit:
         p = [all_p[r[j+1]] - all_p[r[j]] for j in range(len(r)-1)]
         s = [all_p[idx] for idx in r[1:-1]]
-        sc = sum(x**2 for x in p) # Suosii pitkiä lautoja
+        sc = sum(x**2 for x in p)
         valmiit.append({'palat': p, 'saumat': s, 'idx': r, 'l_score': sc})
-    
     valmiit.sort(key=lambda x: (len(x['palat']), -x['l_score']))
     m_a = valmiit[0]; m_b = None; a_set = set(m_a['idx'][1:-1])
-    
-    # Etsitään B, joka ei ole vierekkäin A:n kanssa
-    for ehd in valmiit:
-        b_idx = ehd['idx'][1:-1]
-        if not b_idx: continue
-        safe = True
-        for b in b_idx:
-            if b in a_set or (b-1) in a_set or (b+1) in a_set: safe = False; break
-        if safe: m_b = ehd; break
+    # Peilikuva-tarkistus
+    rev_palat = m_a['palat'][::-1]; rev_saumat = []; cur = 0
+    for p in rev_palat[:-1]: cur += p; rev_saumat.append(cur)
+    is_rev_valid = True; rev_idx_list = []
+    for s in rev_saumat:
+        if s in all_p and all_p.index(s) in sallitut: rev_idx_list.append(all_p.index(s))
+        else: is_rev_valid = False; break
+    if is_rev_valid:
+        safe_rev = True
+        for b in rev_idx_list:
+            if b in a_set or (b-1) in a_set or (b+1) in a_set: safe_rev = False; break
+        if safe_rev: m_b = {'palat': rev_palat, 'saumat': rev_saumat, 'idx': [0]+rev_idx_list+[len(all_p)-1]}
+    if not m_b:
+        for ehd in valmiit:
+            b_idx = ehd['idx'][1:-1]
+            if not b_idx: continue
+            safe = True
+            for b in b_idx:
+                if b in a_set or (b-1) in a_set or (b+1) in a_set: safe = False; break
+            if safe: m_b = ehd; break
     return m_a, m_b
 
-# --- JALAS-LASKENTALAGIIKKA ---
-def muodosta_kerros_j(alku, j_p, j_l):
-    p_lista, s_lista, curr = [], [], 0
-    p_lista.append(int(alku)); curr += alku
-    if curr < j_p: s_lista.append(curr)
-    while curr + j_l < j_p:
-        p_lista.append(int(j_l)); curr += j_l; s_lista.append(curr)
-    if j_p - curr > 0: p_lista.append(int(j_p - curr))
-    return p_lista, s_lista
-
-def laske_pienin_vali_j(kaikki_saumat):
+# --- LASKENTALAGIIKKA: JALAKSET ---
+def laske_jalas_v4(j_p, j_l, kerrokset, tyyppi="peili"):
+    min_pcs = math.ceil(j_p / j_l)
+    min_x = max(100, j_p - (min_pcs - 1) * j_l)
+    max_x = j_l
+    puolikas = j_l / 2
+    
+    data, saumat = [], []
+    for k in range(int(kerrokset)):
+        if tyyppi == "puolikas":
+            # Käytetään puolikas-aloitusta vain jos se ei lisää kappaleita
+            if k % 2 == 1 and puolikas >= min_x: x_start = puolikas
+            else: x_start = max_x
+        else:
+            x_start = max_x if k % 2 == 0 else min_x
+            
+        p_l, s_l, curr = [], [], 0
+        p_l.append(int(x_start)); curr += x_start
+        if curr < j_p: s_l.append(curr)
+        while curr + j_l < j_p:
+            p_l.append(int(j_l)); curr += j_l; s_l.append(curr)
+        if j_p - curr > 0: p_l.append(int(j_p - curr))
+        data.append(p_l); saumat.append(s_l)
+        
     min_v = float('inf')
-    for i in range(len(kaikki_saumat) - 1):
-        for s1 in kaikki_saumat[i]:
-            for s2 in kaikki_saumat[i+1]:
+    for i in range(len(saumat) - 1):
+        for s1 in saumat[i]:
+            for s2 in saumat[i+1]:
                 min_v = min(min_v, abs(s1 - s2))
-    return int(min_v) if min_v != float('inf') else 0
-
-def ratkaise_jalas_j(j_p, j_l, kerrokset, min_v_req, tyyppi="peili"):
-    pcs = math.ceil(j_p / j_l)
-    for current_pcs in range(pcs, pcs + 2):
-        min_x = max(100, j_p - (current_pcs - 1) * j_l)
-        max_x = min(j_l, j_p - 100) if current_pcs > 1 else j_l
-        data_f, saumat_f = [], []
-        for k in range(int(kerrokset)):
-            x = max_x if (tyyppi == "peili" and k % 2 == 0) else min_x
-            if tyyppi == "liuku" and kerrokset > 1:
-                x = max_x - (k * (max_x - min_x) / (kerrokset - 1))
-            p, s = muodosta_kerros_j(x, j_p, j_l)
-            data_f.append(p); saumat_f.append(s)
-        v = laske_pienin_vali_j(saumat_f)
-        if min_v_req == 0 or v >= min_v_req or current_pcs > pcs:
-            return data_f, v, current_pcs
-    return data_f, v, current_pcs
+    return data, int(min_v) if min_v != float('inf') else 0, min_pcs
 
 # --- PÄÄOHJELMA ---
-st.set_page_config(page_title="Pakkauslaskin v3.9", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v3.9")
+st.set_page_config(page_title="Pakkauslaskin v4.0", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.0")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
 
-tab1, tab2 = st.tabs(["📊 Lattiapohja", "🪵 Jalakset"])
+t1, t2 = st.tabs(["📊 Lattiapohja", "🪵 Jalakset"])
 
-with tab1:
-    st.header("Lattiapohjan jako")
-    c1, c2, c3 = st.columns(3)
+with t1:
+    st.header("Lattiapohjan jako (Palautettu v2.9)")
+    c1, c2 = st.columns(2)
     with c1:
-        f_max_l = st.number_input("Laudan pituus mm", key="f_max_l")
+        f_max = st.number_input("Laudan pituus mm", key="f_max_l")
         f_ulp = st.number_input("ulkopituus mm", key="f_ulp")
-    with c2:
         f_tne = st.number_input("tn etäisyys mm", key="f_tne")
+    with c2:
         f_tnv = st.number_input("tn väli mm", key="f_tnv")
-    with c3:
         f_tnm = st.number_input("tn määrä kpl", key="f_tnm")
-        f_min_v_f = st.number_input("Vähimmäisväli mm (valinnainen)", key="f_min_v")
 
     if st.button("Laske lattiapohja", type="primary"):
         nostot = [int(f_tne + (i * f_tnv)) for i in range(int(f_tnm)) if (int(f_tne + (i * f_tnv))) < f_ulp]
         all_p = [0] + nostot + [int(f_ulp)]
         sallitut = list(range(2, len(all_p) - 2))
-        
-        if nostot and abs(nostot[0] - (f_ulp - nostot[-1])) > 1: st.warning("⚠️ Jako ei symmetrinen!")
-        
-        m_a, m_b = yrita_laskea_pari_f(f_max_l, all_p, sallitut, nostot)
+        m_a, m_b = yrita_laskea_pari_f(f_max, all_p, sallitut)
         if m_a and m_b:
-            min_v_act = float('inf')
-            for sa in m_a['saumat']:
-                for sb in m_b['saumat']: min_v_act = min(min_v_act, abs(sa - sb))
-            
             st.success("Laskenta valmis!")
-            if f_min_v_f > 0 and min_v_act < f_min_v_f:
-                st.error(f"❌ Ei täytä vähimmäisväliä {f_min_v_f} mm (Nykyinen: {int(min_v_act)} mm)")
-            
             piirra_lautajako(m_a, m_b, f_ulp, nostot)
-            colA, colB = st.columns(2)
-            with colA: st.info(f"**MALLI A**\n\n{len(m_a['palat'])} kpl: {' + '.join(map(str, m_a['palat']))} mm")
-            with colB: st.info(f"**MALLI B**\n\n{len(m_b['palat'])} kpl: {' + '.join(map(str, m_b['palat']))} mm")
-        else: st.error("Jako ei mahdollinen näillä asetuksilla.")
+            col1, col2 = st.columns(2)
+            with col1: st.info(f"**MALLI A**\n\n{len(m_a['palat'])} kpl: {' + '.join(map(str, m_a['palat']))} mm")
+            with col2: st.info(f"**MALLI B**\n\n{len(m_b['palat'])} kpl: {' + '.join(map(str, m_b['palat']))} mm")
+        else: st.error("Jako ei mahdollinen.")
 
-with tab2:
-    st.header("Jalas-laskenta")
-    cj1, cj2, cj3 = st.columns(3)
+with t2:
+    st.header("Jalas-laskenta (Minimi kappaleet & Puolikas-optio)")
+    cj1, cj2 = st.columns(2)
     with cj1:
         j_p = st.number_input("Jalaksen kokonaispituus mm", key="j_jalas_p")
         j_l = st.number_input("Käytettävän laudan pituus mm", key="j_lauta_p")
     with cj2:
         j_k = st.number_input("Montako jalasta naulataan yhteen (kpl)", key="j_kerrokset")
-    with cj3:
-        j_min_v_j = st.number_input("Vähimmäisväli mm (valinnainen)", key="j_min_v")
 
     if st.button("Laske jalasten jako", type="primary"):
         if j_l >= j_p: st.info("Jalas voidaan tehdä yhdestä puusta.")
         else:
-            d1, v1, p1 = ratkaise_jalas_j(j_p, j_l, j_k, j_min_v_j, "peili")
-            d2, v2, p2 = ratkaise_jalas_j(j_p, j_l, j_k, j_min_v_j, "liuku")
-            st.success(f"Laskenta suoritettu. Käytetty: **{p1} kpl / kerros**.")
+            d1, v1, p1 = laske_jalas_v4(j_p, j_l, j_k, "peili")
+            d2, v2, p2 = laske_jalas_v4(j_p, j_l, j_k, "puolikas")
+            st.success(f"Laskenta valmis: **{p1} kappaletta** per kerros.")
             
-            st.subheader("Vaihtoehto 1: Vuorotteleva jako")
-            piirra_jalasjako(d1, j_p, "Peilikuvalla optimoitu", v1)
+            st.subheader("Vaihtoehto 1: Vuorotteleva jako (Max/Min)")
+            piirra_jalasjako(d1, j_p, "Vierekkäisten kerrosten maksimi limitys", v1)
             st.divider()
-            st.subheader("Vaihtoehto 2: Liukuva jako")
-            piirra_jalasjako(d2, j_p, "Liukuva porrastus", v2)
-
+            st.subheader("Vaihtoehto 2: Puolikas-aloitus (Jos mahdollista)")
+            if (j_l/2) < (j_p - (p1-1)*j_l):
+                st.warning("Puolikas-aloitus lisäisi kappalemäärää, joten se on korvattu minimialoituksella.")
+            piirra_jalasjako(d2, j_p, "Sahausta helpottava aloitus", v2)
+            
             res1, res2 = st.columns(2)
             with res1:
                 st.write("**V1 ohje:**")
