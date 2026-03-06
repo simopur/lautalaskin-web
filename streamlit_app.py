@@ -5,7 +5,7 @@ import math
 
 # --- SYÖTTÖKENTTIEN HALLINTA ---
 DEFAULTS = {
-    "f_max_l": 3900, "f_ulp": 12110, "f_tne": 295, "f_tnv": 960, "f_tnm": 13,
+    "f_max_l": 5100, "f_ulp": 12110, "f_tne": 295, "f_tnv": 960, "f_tnm": 13,
     "j_jalas_p": 10000, "j_lauta_p": 4000, "j_kerrokset": 3
 }
 
@@ -18,17 +18,15 @@ for key, val in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- VISUALISOINTI: LATTIAPOHJA ---
+# --- VISUALISOINTI ---
 def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     fig, ax = plt.subplots(figsize=(12, 3)) 
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
     l_w, v = 100, 10 
     kaikki_s = set(malli_a['saumat'])
     if malli_b: kaikki_s.update(malli_b['saumat'])
-    
     for n in nostot:
         ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
-    
     for i, jako in enumerate(jaot):
         if not jako: continue
         y_pos = i * (l_w + v)
@@ -38,22 +36,19 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
                                      facecolor='#e67e22' if i%2==0 else '#d35400', alpha=0.8)
             ax.add_patch(rect)
             if pala > 800:
-                ax.text(cx + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', 
-                        color='white', fontsize=7, fontweight='bold')
+                ax.text(cx + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', color='white', fontsize=7, fontweight='bold')
             cx += pala
             if j < len(jako['palat']) - 1:
                 ax.plot([cx, cx], [y_pos, y_pos + l_w], color='black', linewidth=2.5)
-
     ax.set_xlim(-200, ulkopituus + 200); ax.set_ylim(-50, 5 * (l_w + v) + 50); ax.set_aspect('equal')
     ax.set_xticks(nostot); labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     for i, n in enumerate(nostot):
         if n in kaikki_s: labels[i].set_fontweight('bold')
-    ax.set_yticks([(l_w/2) + i*(l_w+v) for i in range(5)])
+    ax.set_yticks([(l_w/2) + k*(l_w+v) for k in range(5)])
     ax.set_yticklabels(["A", "B", "A", "B", "A"], fontsize=8)
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- VISUALISOINTI: JALAKSET ---
 def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
     fig, ax = plt.subplots(figsize=(12, 1.5 + len(kerrokset_data)*0.5))
     colors = ['#8e44ad', '#2980b9', '#27ae60']
@@ -76,10 +71,9 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- LASKENTALAGIIKKA: LATTIAPOHJA ---
+# --- LASKENTALOGIIKKA: LATTIAPOHJA ---
 def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut):
     if pisteet[-1] - pisteet[n_idx] <= max_l:
-        # Ei saa lopettaa trukkinostoon idx len-2
         if n_idx != len(pisteet) - 2: return [reitti + [len(pisteet)-1]]
     res = []
     for s_idx in sallitut:
@@ -107,7 +101,7 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
             m_b = ehd; break
     return m_a, m_b
 
-# --- LASKENTALAGIIKKA: JALAKSET (Mestarin Ohjeet) ---
+# --- LASKENTALOGIIKKA: JALAKSET ---
 def muodosta_kerros_j(alku, j_p, j_l):
     p_l, s_l, curr = [], [], 0
     p_l.append(int(alku)); curr += alku
@@ -117,23 +111,22 @@ def muodosta_kerros_j(alku, j_p, j_l):
     if j_p - curr > 0: p_l.append(int(j_p - curr))
     return p_l, s_l
 
-def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
+def laske_jalas_ohjeistettu(j_p, j_l, kerrokset):
     data, saumat = [], []
     rem = j_p % j_l
     
-    # Kerros 1: Täydet kanget
+    # K1: Täydet kanget ensin
     k1_p, k1_s = muodosta_kerros_j(j_l, j_p, j_l)
     data.append(k1_p); saumat.append(k1_s)
     
-    # Kerros 2: Puolikas kanki
+    # K2: Aloitus puolikkaalla kankella
     if kerrokset >= 2:
         k2_p, k2_s = muodosta_kerros_j(j_l/2, j_p, j_l)
         data.append(k2_p); saumat.append(k2_s)
         
-    # Kerros 3: Tasattu keskitys
+    # K3: Tasattu jako (L+Rem)/2
     if kerrokset >= 3:
-        # Ohje: Lisää kangen mittaan jäljelle jäävä ja jaa kahdella
-        tasattu = (j_l + rem) / 2 if rem > 0 else j_l / 2
+        tasattu = (j_l + rem) / 2 if rem > 0 else j_l/2
         k3_p, k3_s = muodosta_kerros_j(tasattu, j_p, j_l)
         data.append(k3_p); saumat.append(k3_s)
         
@@ -144,9 +137,9 @@ def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
                 min_v = min(min_v, abs(s1 - s2))
     return data, int(min_v) if min_v != float('inf') else 0
 
-# --- PÄÄOHJELMA ---
-st.set_page_config(page_title="Pakkauslaskin v4.3", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.3")
+# --- KÄYTTÖLIITTYMÄ ---
+st.set_page_config(page_title="Pakkauslaskin v4.4", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.4")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
@@ -173,6 +166,11 @@ with t1:
         if m_a and m_b:
             st.success("Laskenta valmis!")
             piirra_lautajako(m_a, m_b, f_ulp, nostot)
+            colA, colB = st.columns(2)
+            with colA:
+                st.info(f"**MALLI A (Pohja)**\n\nKappaleita: {len(m_a['palat'])} kpl\n\nLaudat: {' + '.join(map(str, m_a['palat']))} mm")
+            with colB:
+                st.info(f"**MALLI B (Porrastettu)**\n\nKappaleita: {len(m_b['palat'])} kpl\n\nLaudat: {' + '.join(map(str, m_b['palat']))} mm")
         else:
             test_l, loytyi = f_max, False
             while test_l < f_ulp:
@@ -181,7 +179,7 @@ with t1:
                 if ta and tb: loytyi = True; break
             
             msg = "Lisää yksi trukkinosto tai käytä pidempää lautaa, jako ei mahdollinen."
-            if loytyi: st.error(f"❌ {msg}\n\n**Vaadittu vähimmäispituus on {int(test_l)} mm.**")
+            if loytyi: st.error(f"❌ {msg}\n\n**Laudan vaadittu vähimmäispituus on {int(test_l)} mm.**")
             else: st.error(f"❌ {msg}")
 
 with t2:
@@ -196,8 +194,8 @@ with t2:
     if st.button("Laske jalasten jako", type="primary"):
         if j_l >= j_p: st.info("Jalas voidaan tehdä yhdestä puusta.")
         else:
-            d, v = laske_jalas_mestarimalli(j_p, j_l, j_k)
+            d, v = laske_jalas_ohjeistettu(j_p, j_l, j_k)
             st.success("Jalas laskettu lujuus ja helppous edellä.")
             piirra_jalasjako(d, j_p, v)
             for i, kerros in enumerate(d):
-                st.write(f"**K{i+1}:** {' + '.join(map(str, kerros))} mm")
+                st.info(f"**Kerros {i+1}:** {' + '.join(map(str, kerros))} mm")
