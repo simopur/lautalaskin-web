@@ -25,8 +25,10 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
     l_w, v = 100, 10 
     kaikki_s = set(malli_a['saumat'])
     if malli_b: kaikki_s.update(malli_b['saumat'])
+    
     for n in nostot:
         ax.axvline(x=n, color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
+    
     for i, jako in enumerate(jaot):
         if not jako: continue
         y_pos = i * (l_w + v)
@@ -36,10 +38,12 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
                                      facecolor='#e67e22' if i%2==0 else '#d35400', alpha=0.8)
             ax.add_patch(rect)
             if pala > 800:
-                ax.text(cx + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', color='white', fontsize=7, fontweight='bold')
+                ax.text(cx + pala/2, y_pos + l_w/2, f"{int(pala)}", ha='center', va='center', 
+                        color='white', fontsize=7, fontweight='bold')
             cx += pala
             if j < len(jako['palat']) - 1:
                 ax.plot([cx, cx], [y_pos, y_pos + l_w], color='black', linewidth=2.5)
+
     ax.set_xlim(-200, ulkopituus + 200); ax.set_ylim(-50, 5 * (l_w + v) + 50); ax.set_aspect('equal')
     ax.set_xticks(nostot); labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     for i, n in enumerate(nostot):
@@ -71,7 +75,7 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- LASKENTALOGIIKKA: LATTIAPOHJA ---
+# --- LASKENTALAGIIKKA: LATTIAPOHJA ---
 def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut):
     if pisteet[-1] - pisteet[n_idx] <= max_l:
         if n_idx != len(pisteet) - 2: return [reitti + [len(pisteet)-1]]
@@ -93,15 +97,20 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
         s = [all_p[idx] for idx in r[1:-1]]
         sc = sum(x**2 for x in p)
         valmiit.append({'palat': p, 'saumat': s, 'idx': r, 'l_score': sc})
+    
+    # Kokeillaan useampaa eri A-mallia parin löytämiseksi, ei vain parasta
     valmiit.sort(key=lambda x: (len(x['palat']), -x['l_score']))
-    m_a = valmiit[0]; m_b = None; a_set = set(m_a['idx'][1:-1])
-    for ehd in valmiit:
-        b_idx = ehd['idx'][1:-1]
-        if b_idx and all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in b_idx):
-            m_b = ehd; break
-    return m_a, m_b
+    
+    for i in range(min(20, len(valmiit))):
+        m_a = valmiit[i]
+        a_set = set(m_a['idx'][1:-1])
+        for m_b in valmiit:
+            b_idx = m_b['idx'][1:-1]
+            if b_idx and all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in b_idx):
+                return m_a, m_b
+    return None, None
 
-# --- LASKENTALOGIIKKA: JALAKSET ---
+# --- LASKENTALAGIIKKA: JALAKSET ---
 def muodosta_kerros_j(alku, j_p, j_l):
     p_l, s_l, curr = [], [], 0
     p_l.append(int(alku)); curr += alku
@@ -111,25 +120,18 @@ def muodosta_kerros_j(alku, j_p, j_l):
     if j_p - curr > 0: p_l.append(int(j_p - curr))
     return p_l, s_l
 
-def laske_jalas_ohjeistettu(j_p, j_l, kerrokset):
+def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
     data, saumat = [], []
     rem = j_p % j_l
-    
-    # K1: Täydet kanget ensin
     k1_p, k1_s = muodosta_kerros_j(j_l, j_p, j_l)
     data.append(k1_p); saumat.append(k1_s)
-    
-    # K2: Aloitus puolikkaalla kankella
     if kerrokset >= 2:
         k2_p, k2_s = muodosta_kerros_j(j_l/2, j_p, j_l)
         data.append(k2_p); saumat.append(k2_s)
-        
-    # K3: Tasattu jako (L+Rem)/2
     if kerrokset >= 3:
         tasattu = (j_l + rem) / 2 if rem > 0 else j_l/2
         k3_p, k3_s = muodosta_kerros_j(tasattu, j_p, j_l)
         data.append(k3_p); saumat.append(k3_s)
-        
     min_v = float('inf')
     for i in range(len(saumat)-1):
         for s1 in saumat[i]:
@@ -137,9 +139,9 @@ def laske_jalas_ohjeistettu(j_p, j_l, kerrokset):
                 min_v = min(min_v, abs(s1 - s2))
     return data, int(min_v) if min_v != float('inf') else 0
 
-# --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Pakkauslaskin v4.4", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.4")
+# --- PÄÄOHJELMA ---
+st.set_page_config(page_title="Pakkauslaskin v4.5", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.5")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
@@ -179,11 +181,11 @@ with t1:
                 if ta and tb: loytyi = True; break
             
             msg = "Lisää yksi trukkinosto tai käytä pidempää lautaa, jako ei mahdollinen."
-            if loytyi: st.error(f"❌ {msg}\n\n**Laudan vaadittu vähimmäispituus on {int(test_l)} mm.**")
+            if loytyi: st.error(f"❌ {msg}\n\n**Vaadittu vähimmäispituus on {int(test_l)} mm.**")
             else: st.error(f"❌ {msg}")
 
 with t2:
-    st.header("Jalas-laskenta (Mestarin logiikka)")
+    st.header("Jalas-laskenta (Mestarimalli)")
     cj1, cj2 = st.columns(2)
     with cj1:
         j_p = st.number_input("Jalaksen kokonaispituus mm", key="j_jalas_p")
@@ -194,8 +196,8 @@ with t2:
     if st.button("Laske jalasten jako", type="primary"):
         if j_l >= j_p: st.info("Jalas voidaan tehdä yhdestä puusta.")
         else:
-            d, v = laske_jalas_ohjeistettu(j_p, j_l, j_k)
-            st.success("Jalas laskettu lujuus ja helppous edellä.")
+            d, v = laske_jalas_mestarimalli(j_p, j_l, j_k)
+            st.success("Jalas laskettu optimaalisesti.")
             piirra_jalasjako(d, j_p, v)
             for i, kerros in enumerate(d):
                 st.info(f"**Kerros {i+1}:** {' + '.join(map(str, kerros))} mm")
