@@ -19,7 +19,7 @@ for key, val in DEFAULTS.items():
         st.session_state[key] = val
 
 # --- VISUALISOINTI ---
-def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
+def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot, title):
     fig, ax = plt.subplots(figsize=(12, 3)) 
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
     l_w, v = 100, 10 
@@ -45,6 +45,7 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot):
                 ax.plot([cx, cx], [y_pos, y_pos + l_w], color='black', linewidth=2.5)
 
     ax.set_xlim(-200, ulkopituus + 200); ax.set_ylim(-50, 5 * (l_w + v) + 50); ax.set_aspect('equal')
+    ax.set_title(title, fontsize=10, fontweight='bold')
     ax.set_xticks(nostot); labels = ax.set_xticklabels([str(int(n)) for n in nostot], fontsize=7, rotation=45)
     for i, n in enumerate(nostot):
         if n in kaikki_s: labels[i].set_fontweight('bold')
@@ -69,7 +70,7 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
             if j < len(kerros) - 1:
                 ax.plot([cx, cx], [y_pos, y_pos + l_h], color='black', linewidth=3)
     ax.set_xlim(-100, kokonaispituus + 100); ax.set_ylim(-20, len(kerrokset_data)*(l_h+v) + 20); ax.set_aspect('equal')
-    ax.set_title(f"Jalasrakenne (Pienin vierekkäinen saumaväli: {min_v} mm)", fontsize=10, fontweight='bold')
+    ax.set_title(f"Jalasrakenne (Minimi vierekkäinen saumaväli: {min_v} mm)", fontsize=10, fontweight='bold')
     ax.set_yticks([(l_h/2) + k*(l_h+v) for k in range(len(kerrokset_data))])
     ax.set_yticklabels([f"K{k+1}" for k in range(len(kerrokset_data))], fontsize=8)
     for spine in ax.spines.values(): spine.set_visible(False)
@@ -90,7 +91,7 @@ def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut):
 
 def yrita_laskea_pari_f(m_l, all_p, sallitut):
     reitit = etsi_reitit_f(0, [0], m_l, all_p, sallitut)
-    if not reitit: return None, None
+    if not reitit: return []
     valmiit = []
     for r in reitit:
         p = [all_p[r[j+1]] - all_p[r[j]] for j in range(len(r)-1)]
@@ -98,17 +99,48 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
         sc = sum(x**2 for x in p)
         valmiit.append({'palat': p, 'saumat': s, 'idx': r, 'l_score': sc})
     
-    # Kokeillaan useampaa eri A-mallia parin löytämiseksi, ei vain parasta
     valmiit.sort(key=lambda x: (len(x['palat']), -x['l_score']))
+    parit = []
+    kaytetyt_a = []
     
-    for i in range(min(20, len(valmiit))):
-        m_a = valmiit[i]
-        a_set = set(m_a['idx'][1:-1])
-        for m_b in valmiit:
-            b_idx = m_b['idx'][1:-1]
-            if b_idx and all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in b_idx):
-                return m_a, m_b
-    return None, None
+    for m_a in valmiit[:30]: # Kokeillaan tarpeeksi ehdokkaita parin löytämiseksi
+        if m_a['idx'] in kaytetyt_a: continue
+        m_b, is_mirror = None, False
+        
+        # Tarkistetaan peilikuvamahdollisuus (Reverse)
+        rev_palat = m_a['palat'][::-1]
+        rev_s, cur = [], 0
+        for p_val in rev_palat[:-1]:
+            cur += p_val
+            rev_s.append(cur)
+        
+        is_rev_valid = True
+        rev_idx_list = []
+        for sv in rev_s:
+            if sv in all_p and all_p.index(sv) in sallitut: rev_idx_list.append(all_p.index(sv))
+            else: is_rev_valid = False; break
+        
+        if is_rev_valid:
+            a_set = set(m_a['idx'][1:-1])
+            if all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in rev_idx_list):
+                m_b = {'palat': rev_palat, 'saumat': rev_s, 'idx': [0]+rev_idx_list+[len(all_p)-1]}
+                is_mirror = True
+        
+        if not m_b: # Jos peili ei käy, etsitään muu sopiva
+            for ehd in valmiit:
+                b_idx = ehd['idx'][1:-1]
+                if b_idx:
+                    a_set = set(m_a['idx'][1:-1])
+                    if all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in b_idx):
+                        m_b = ehd; break
+        
+        if m_b:
+            parit.append({'a': m_a, 'b': m_b, 'is_mirror': is_mirror})
+            kaytetyt_a.append(m_a['idx'])
+            if len(parit) >= 5: break
+            
+    parit.sort(key=lambda x: (not x['is_mirror'], len(x['a']['palat']), -x['a']['l_score']))
+    return parit[:2]
 
 # --- LASKENTALAGIIKKA: JALAKSET ---
 def muodosta_kerros_j(alku, j_p, j_l):
@@ -140,8 +172,8 @@ def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
     return data, int(min_v) if min_v != float('inf') else 0
 
 # --- PÄÄOHJELMA ---
-st.set_page_config(page_title="Pakkauslaskin v4.5", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.5")
+st.set_page_config(page_title="Pakkauslaskin v4.6", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.6")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
@@ -163,23 +195,24 @@ with t1:
         nostot = [int(f_tne + (i * f_tnv)) for i in range(int(f_tnm)) if (int(f_tne + (i * f_tnv))) < f_ulp]
         all_p = [0] + nostot + [int(f_ulp)]
         sallitut = list(range(2, len(all_p) - 2))
-        m_a, m_b = yrita_laskea_pari_f(f_max, all_p, sallitut)
+        parit = yrita_laskea_pari_f(f_max, all_p, sallitut)
         
-        if m_a and m_b:
-            st.success("Laskenta valmis!")
-            piirra_lautajako(m_a, m_b, f_ulp, nostot)
-            colA, colB = st.columns(2)
-            with colA:
-                st.info(f"**MALLI A (Pohja)**\n\nKappaleita: {len(m_a['palat'])} kpl\n\nLaudat: {' + '.join(map(str, m_a['palat']))} mm")
-            with colB:
-                st.info(f"**MALLI B (Porrastettu)**\n\nKappaleita: {len(m_b['palat'])} kpl\n\nLaudat: {' + '.join(map(str, m_b['palat']))} mm")
+        if parit:
+            st.success(f"Löydetty {len(parit)} parasta vaihtoehtoa!")
+            for idx, pari in enumerate(parit):
+                m_a, m_b = pari['a'], pari['b']
+                t_str = "Vaihtoehto " + str(idx+1) + (": Peilikuvajako" if pari['is_mirror'] else "")
+                piirra_lautajako(m_a, m_b, f_ulp, nostot, t_str)
+                colA, colB = st.columns(2)
+                with colA: st.info(f"**A:** {' + '.join(map(str, m_a['palat']))} mm")
+                with colB: st.info(f"**B:** {' + '.join(map(str, m_b['palat']))} mm")
+                st.divider()
         else:
             test_l, loytyi = f_max, False
             while test_l < f_ulp:
                 test_l += 10
-                ta, tb = yrita_laskea_pari_f(test_l, all_p, sallitut)
-                if ta and tb: loytyi = True; break
-            
+                res = yrita_laskea_pari_f(test_l, all_p, sallitut)
+                if res: loytyi = True; break
             msg = "Lisää yksi trukkinosto tai käytä pidempää lautaa, jako ei mahdollinen."
             if loytyi: st.error(f"❌ {msg}\n\n**Vaadittu vähimmäispituus on {int(test_l)} mm.**")
             else: st.error(f"❌ {msg}")
