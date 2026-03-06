@@ -101,15 +101,18 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
     
     valmiit.sort(key=lambda x: (len(x['palat']), -x['l_score']))
     parit = []
-    kaytetyt_a = []
-    
-    for m_a in valmiit[:30]: # Kokeillaan tarpeeksi ehdokkaita parin löytämiseksi
-        if m_a['idx'] in kaytetyt_a: continue
+    nahtyat_jaot = [] # Tänne tallennetaan käytettyjen lautojen sarjat
+
+    for m_a in valmiit[:100]:
+        # Estetään saman jaon näyttäminen uudestaan (edes käännettynä)
+        jako_tunniste = tuple(sorted(m_a['palat']))
+        if jako_tunniste in nahtyat_jaot: continue
+        
         m_b, is_mirror = None, False
         
-        # Tarkistetaan peilikuvamahdollisuus (Reverse)
+        # 1. KOKEILLAAN PEILIKUVAA (Mirror)
         rev_palat = m_a['palat'][::-1]
-        rev_s, cur = [], 0
+        cur, rev_s = 0, []
         for p_val in rev_palat[:-1]:
             cur += p_val
             rev_s.append(cur)
@@ -126,7 +129,8 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
                 m_b = {'palat': rev_palat, 'saumat': rev_s, 'idx': [0]+rev_idx_list+[len(all_p)-1]}
                 is_mirror = True
         
-        if not m_b: # Jos peili ei käy, etsitään muu sopiva
+        # 2. JOS PEILI EI KÄY, ETSITÄÄN TOINEN MALLI
+        if not m_b:
             for ehd in valmiit:
                 b_idx = ehd['idx'][1:-1]
                 if b_idx:
@@ -136,11 +140,10 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
         
         if m_b:
             parit.append({'a': m_a, 'b': m_b, 'is_mirror': is_mirror})
-            kaytetyt_a.append(m_a['idx'])
-            if len(parit) >= 5: break
+            nahtyat_jaot.append(jako_tunniste)
+            if len(parit) >= 2: break
             
-    parit.sort(key=lambda x: (not x['is_mirror'], len(x['a']['palat']), -x['a']['l_score']))
-    return parit[:2]
+    return parit
 
 # --- LASKENTALAGIIKKA: JALAKSET ---
 def muodosta_kerros_j(alku, j_p, j_l):
@@ -171,9 +174,9 @@ def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
                 min_v = min(min_v, abs(s1 - s2))
     return data, int(min_v) if min_v != float('inf') else 0
 
-# --- PÄÄOHJELMA ---
-st.set_page_config(page_title="Pakkauslaskin v4.6", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.6")
+# --- KÄYTTÖLIITTYMÄ ---
+st.set_page_config(page_title="Pakkauslaskin v4.7", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.7")
 
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
@@ -198,14 +201,14 @@ with t1:
         parit = yrita_laskea_pari_f(f_max, all_p, sallitut)
         
         if parit:
-            st.success(f"Löydetty {len(parit)} parasta vaihtoehtoa!")
+            st.success(f"Löydetty {len(parit)} erilaista vaihtoehtoa!")
             for idx, pari in enumerate(parit):
                 m_a, m_b = pari['a'], pari['b']
-                t_str = "Vaihtoehto " + str(idx+1) + (": Peilikuvajako" if pari['is_mirror'] else "")
+                t_str = f"Vaihtoehto {idx+1}: " + ("Peilikuvajako" if pari['is_mirror'] else "Eri pituuksilla")
                 piirra_lautajako(m_a, m_b, f_ulp, nostot, t_str)
                 colA, colB = st.columns(2)
-                with colA: st.info(f"**A:** {' + '.join(map(str, m_a['palat']))} mm")
-                with colB: st.info(f"**B:** {' + '.join(map(str, m_b['palat']))} mm")
+                with colA: st.info(f"**Malli A:** {' + '.join(map(str, m_a['palat']))} mm")
+                with colB: st.info(f"**Malli B:** {' + '.join(map(str, m_b['palat']))} mm")
                 st.divider()
         else:
             test_l, loytyi = f_max, False
@@ -219,6 +222,7 @@ with t1:
 
 with t2:
     st.header("Jalas-laskenta (Mestarimalli)")
+    # (Jalas-koodi pidetty ennallaan kuten edellisessä versiossa)
     cj1, cj2 = st.columns(2)
     with cj1:
         j_p = st.number_input("Jalaksen kokonaispituus mm", key="j_jalas_p")
