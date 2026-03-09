@@ -16,9 +16,28 @@ def get_contrast_color(hex_color):
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
     return "white" if luminance < 0.5 else "black"
 
+def piirra_paneelin_teksti(ax, p, base_fs=6):
+    """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
+    teksti = f"{int(p.w)}x{int(p.h)}"
+    
+    # Lasketaan optimaalinen fonttikoko (pienempi pituussuunta määrää)
+    # Suhteutetaan fontti palan mittoihin
+    fs = min(base_fs, p.w / 18, p.h / 18)
+    fs = max(fs, 2.5) # Alaraja, ettei mene lukukelvottomaksi
+    
+    # Jos pala on selkeästi kapea ja korkea, käännetään teksti 90 astetta
+    rotation = 90 if (p.h > p.w * 1.3) else 0
+    
+    # Piirretään teksti vain jos pala on tarpeeksi suuri näkyäkseen
+    if p.w > 40 and p.h > 40:
+        ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
+                ha='center', va='center', fontsize=fs,
+                fontweight='bold', color=getattr(p, 'text_color', 'black'),
+                rotation=rotation)
+
 class Panel:
     def __init__(self, w, h, label="", is_standard=False):
-        self.w, self.h = w, h
+        self.w, self.h = int(w), int(h) # Pakotetaan tasamillimetrit
         self.label = label
         self.x, self.y = 0, 0
         self.is_rotated = False
@@ -26,16 +45,16 @@ class Panel:
         if is_standard:
             self.color = "#95a5a6" 
         else:
-            dims = sorted([w, h])
+            dims = sorted([self.w, self.h])
             tag = f"{dims[0]}x{dims[1]}"
             self.color = "#" + hashlib.md5(tag.encode()).hexdigest()[:6]
         self.text_color = get_contrast_color(self.color)
 
 class MaxRectsOptimizer:
     def __init__(self, stock_w, stock_h, kerf):
-        self.stock_w = stock_w
-        self.stock_h = stock_h
-        self.kerf = kerf
+        self.stock_w = int(stock_w)
+        self.stock_h = int(stock_h)
+        self.kerf = int(kerf)
         self.sheets = []
 
     def optimize(self, panels):
@@ -91,7 +110,7 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
-        sorted_lib = sorted(library, key=lambda x: x['Pit'] * x['Lev'], reverse=True)
+        sorted_lib = sorted(library, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
         for sheet in self.sheets:
             added_any = True
             while added_any:
@@ -99,7 +118,7 @@ class MaxRectsOptimizer:
                 for r_idx, rect in enumerate(sheet['free_rects']):
                     for item in sorted_lib:
                         for rot in [False, True]:
-                            w, h = (item['Lev'], item['Pit']) if rot else (item['Pit'], item['Lev'])
+                            w, h = (int(item['Lev']), int(item['Pit'])) if rot else (int(item['Pit']), int(item['Lev']))
                             if w <= rect['w'] and h <= rect['h']:
                                 p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
                                 p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
@@ -167,8 +186,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
         ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
         for p in l['panels']:
             ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
-            if p.w > 120:
-                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=getattr(p, 'text_color', 'black'))
+            piirra_paneelin_teksti(ax, p, base_fs=6)
         for r in l['waste']:
             ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
         ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
@@ -186,7 +204,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.4.1")
+    st.subheader("📐 Levyoptimoija v4.5 (Puhdas asettelu)")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -200,7 +218,10 @@ def nayta_levyoptimoija():
         input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
         with st.expander("📦 Hallitse vakiotuotteita"):
+            # Pakotetaan kirjaston koot kokonaisluvuiksi
             df_v = pd.DataFrame(st.session_state.kirjasto)
+            df_v["Pit"] = df_v["Pit"].astype(int)
+            df_v["Lev"] = df_v["Lev"].astype(int)
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
             if not edited_v.equals(df_v):
                 st.session_state.kirjasto = edited_v.to_dict('records')
@@ -245,11 +266,11 @@ def nayta_levyoptimoija():
                 with c_vis1:
                     osat = [p for p in l['panels'] if not getattr(p, 'is_standard', False)]
                     st.write("**Tilausosat:**")
-                    st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in osat]), hide_index=True)
+                    st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{int(p.w)}x{int(p.h)}"} for p in osat]), hide_index=True)
                     vakiot = [p for p in l['panels'] if getattr(p, 'is_standard', False)]
                     if vakiot:
                         st.write("**Varastoon (Vakio):**")
-                        v_df = pd.DataFrame([{"Osa": p.label, "W": p.w, "H": p.h} for p in vakiot])
+                        v_df = pd.DataFrame([{"Osa": p.label, "W": int(p.w), "H": int(p.h)} for p in vakiot])
                         v_koonti = v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl")
                         st.dataframe(v_koonti, hide_index=True)
 
@@ -258,8 +279,7 @@ def nayta_levyoptimoija():
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
-                        if p.w > 120:
-                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color=getattr(p, 'text_color', 'black'))
+                        piirra_paneelin_teksti(ax, p, base_fs=5.5)
                     for r in l['waste']:
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
                     ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off')
