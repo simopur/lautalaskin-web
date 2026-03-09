@@ -11,7 +11,6 @@ from fpdf import FPDF
 # --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
-    """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -62,7 +61,7 @@ class MaxRectsOptimizer:
             new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
             self.sheets.append(new_sheet)
             w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
-            self._execute_placement(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
+            self._place_pala(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
 
     def _execute_placement(self, p, sheet, used_rect, w, h, rot):
         p.x, p.y, p.w, p.h, p.is_rotated = used_rect['x'], used_rect['y'], w, h, rot
@@ -118,13 +117,14 @@ KIRJASTO_TIEDOSTO = "vakiokoot.json"
 
 def lataa_kirjasto():
     if os.path.exists(KIRJASTO_TIEDOSTO):
-        with open(KIRJASTO_TIEDOSTO, "r") as f: return json.load(f)
+        try:
+            with open(KIRJASTO_TIEDOSTO, "r") as f: return json.load(f)
+        except: pass
     return [{"Nimi": "Talla 200", "Pit": 200, "Lev": 200}]
 
 def group_layouts(sheets):
     unique = []
     for s in sheets:
-        # Käytetään getattria, jotta vanhat oliot muistissa eivät kaada sovellusta
         fp_p = sorted([(p.w, p.h, p.x, p.y, getattr(p, 'is_standard', False)) for p in s['panels']])
         fp_w = sorted([(r['w'], r['h'], r['x'], r['y']) for r in s['free_rects'] if r['w']*r['h'] > 100])
         fingerprint = (tuple(fp_p), tuple(fp_w))
@@ -151,7 +151,7 @@ def parse_excel_input(text, full_w):
             for _ in range(kpl * taysi_lkm): panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
             if jatko_w > 0:
                 for _ in range(kpl): panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
-        except Exception: continue
+        except: continue
     return panels
 
 def create_pdf_bytes(layouts, s_w, s_h):
@@ -186,7 +186,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.3.1 (Auto-Fill & Fix)")
+    st.subheader("📐 Levyoptimoija v4.4")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -200,9 +200,14 @@ def nayta_levyoptimoija():
         input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
         with st.expander("📦 Hallitse vakiotuotteita"):
+            # Käytetään session_state.kirjasto suoraan editorissa
             df_v = pd.DataFrame(st.session_state.kirjasto)
-            ed_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True)
-            if st.button("Päivitä kirjasto"): st.session_state.kirjasto = ed_v.to_dict('records')
+            edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
+            
+            # Päivitetään muisti jos taulukkoa on muokattu
+            if not edited_v.equals(df_v):
+                st.session_state.kirjasto = edited_v.to_dict('records')
+                st.rerun()
 
     palat = []
     if input_type == "Manuaalinen":
