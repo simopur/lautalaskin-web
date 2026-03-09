@@ -1,6 +1,7 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import pandas as pd
 
 class Panel:
     def __init__(self, w, h, label="", color='skyblue'):
@@ -61,7 +62,6 @@ def optimize_sheets(panels, s_w, s_h, kerf):
                 sheet['shelves'].append({'y': y, 'h': bh, 'rem_w': s_w - (bw + kerf)})
                 sheet['panels'].append(p)
             else:
-                # Jos ei mahdu nykyiselle, luodaan täysin uusi levy
                 sheets.append({'panels': [], 'shelves': []})
                 sheet = sheets[-1]
                 bw, bh, br = min(opts, key=lambda x: x[1])
@@ -71,12 +71,9 @@ def optimize_sheets(panels, s_w, s_h, kerf):
     return sheets
 
 def group_layouts(sheets):
-    """Ryhmittelee identtiset sahauskuviot ja laskee toistot."""
     unique_layouts = []
     for sheet in sheets:
-        # Luodaan uniikki sormenjälki paneelien mitoista ja sijainneista
         fingerprint = tuple(sorted([(p.w, p.h, p.x, p.y) for p in sheet['panels']]))
-        
         found = False
         for layout in unique_layouts:
             if layout['fingerprint'] == fingerprint:
@@ -89,49 +86,63 @@ def group_layouts(sheets):
 def nayta_levyoptimoija():
     st.header("📐 Levyjen sahausoptimointi")
     
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        s_w = st.number_input("Varastolevyn pituus (mm)", value=2440, key="stock_w")
-        s_h = st.number_input("Varastolevyn leveys (mm)", value=1220, key="stock_h")
-        full_w = st.number_input("Täyden suikaleen leveys (mm)", value=1220, key="full_w")
-        kerf = st.slider("Terän hukka (mm)", 0, 10, 4, key="kerf_val")
-        excel_input = st.text_area("Liitä Excel-tiedot:", height=200)
-
-    with col2:
+    with st.sidebar:
+        st.subheader("Varastolevyn asetukset")
+        s_w = st.number_input("Varastolevyn pituus (mm)", value=2700)
+        s_h = st.number_input("Varastolevyn leveys (mm)", value=1200)
+        kerf = st.slider("Terän hukka (mm)", 0, 10, 4)
+    
+    input_method = st.radio("Valitse syöttötapa:", ["Excel-kopiointi", "Manuaalinen syöttö"], horizontal=True)
+    
+    palat = []
+    if input_method == "Excel-kopiointi":
+        full_w = st.number_input("Täyden suikaleen leveys (mm)", value=1220)
+        excel_input = st.text_area("Liitä Excel-tiedot tähän:", height=150)
         if excel_input:
             palat = parse_excel_input(excel_input, full_w)
-            kaikki_levyt = optimize_sheets(palat, s_w, s_h, kerf)
-            layouts = group_layouts(kaikki_levyt)
-            
-            # Yhteenveto
-            st.subheader("Yhteenveto")
-            total_area = s_w * s_h * len(kaikki_levyt)
-            used_area = sum(p.w * p.h for p in palat)
-            yield_pct = (used_area / total_area * 100) if total_area > 0 else 0
-            
-            c_res1, c_res2, c_res3 = st.columns(3)
-            c_res1.metric("Levyjä yhteensä", f"{len(kaikki_levyt)} kpl")
-            c_res2.metric("Erilaisia layoutteja", f"{len(layouts)} kpl")
-            c_res3.metric("Hyötykäyttö", f"{yield_pct:.1f} %")
+    else:
+        st.write("Lisää sahattavat palat taulukkoon:")
+        df_init = pd.DataFrame([{"Nimi": "Pala 1", "Leveys": 1132, "Korkeus": 1000, "Kpl": 2}])
+        edited_df = st.data_editor(df_init, num_rows="dynamic", use_container_width=True)
+        if st.button("Laske manuaalisilla tiedoilla"):
+            for _, row in edited_df.iterrows():
+                for _ in range(int(row["Kpl"])):
+                    palat.append(Panel(int(row["Leveys"]), int(row["Korkeus"]), row["Nimi"]))
 
-            st.divider()
+    if palat:
+        kaikki_levyt = optimize_sheets(palat, s_w, s_h, kerf)
+        layouts = group_layouts(kaikki_levyt)
+        
+        # Yhteenveto
+        total_area = s_w * s_h * len(kaikki_levyt)
+        used_area = sum(p.w * p.h for p in palat)
+        yield_pct = (used_area / total_area * 100) if total_area > 0 else 0
+        
+        st.divider()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Levyjä yhteensä", f"{len(kaikki_levyt)} kpl")
+        c2.metric("Erilaisia layoutteja", f"{len(layouts)} kpl")
+        c3.metric("Hyötykäyttö", f"{yield_pct:.1f} %")
 
-            # Layouttien visualisointi
-            for i, layout in enumerate(layouts):
-                layout_id = chr(65 + i) # A, B, C...
-                st.subheader(f"Layout {layout_id}")
-                st.info(f"**Toista tämä sahaus {layout['count']} kertaa**")
-                
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='#f8f9fa', edgecolor='black', lw=2))
+        # Visualisointi sarakkeissa koon pienentämiseksi
+        for i, layout in enumerate(layouts):
+            layout_id = chr(65 + i)
+            st.markdown(f"#### Layout {layout_id} (Toistetaan {layout['count']} kertaa)")
+            
+            # Luodaan sarakkeet, joilla kuva saadaan pienemmäksi (keskelle)
+            _, viz_col, _ = st.columns([0.1, 0.8, 0.1])
+            
+            with viz_col:
+                fig, ax = plt.subplots(figsize=(7, 2.5)) # Pienempi figuuri
+                ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='#f8f9fa', edgecolor='black', lw=1.5))
                 
                 for p in layout['panels']:
                     ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, edgecolor='navy', facecolor=p.color, alpha=0.5))
-                    rot = " (R)" if p.is_rotated else ""
-                    ax.text(p.x + p.w/2, p.y + p.h/2, f"{p.label}{rot}\n{p.w}x{p.h}", ha='center', va='center', fontsize=7)
+                    ax.text(p.x + p.w/2, p.y + p.h/2, f"{p.label}\n{p.w}x{p.h}", ha='center', va='center', fontsize=6)
                 
                 ax.set_xlim(-50, s_w + 50)
                 ax.set_ylim(-50, s_h + 50)
                 ax.set_aspect('equal')
+                ax.axis('off') # Poistetaan akselit turhan tilan viemiseksi
                 st.pyplot(fig)
                 plt.close(fig)
