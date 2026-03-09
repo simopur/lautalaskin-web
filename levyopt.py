@@ -61,7 +61,7 @@ class MaxRectsOptimizer:
             new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
             self.sheets.append(new_sheet)
             w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
-            self._place_pala(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
+            self._execute_placement(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
 
     def _execute_placement(self, p, sheet, used_rect, w, h, rot):
         p.x, p.y, p.w, p.h, p.is_rotated = used_rect['x'], used_rect['y'], w, h, rot
@@ -111,7 +111,7 @@ class MaxRectsOptimizer:
                         if added_any: break
                     if added_any: break
 
-# --- APUFUNKTIOT JA KIRJASTO ---
+# --- KIRJASTO JA PDF ---
 
 KIRJASTO_TIEDOSTO = "vakiokoot.json"
 
@@ -166,7 +166,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
         fig, ax = plt.subplots(figsize=(7, 3))
         ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
         for p in l['panels']:
-            ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
+            ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
             if p.w > 120:
                 ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=getattr(p, 'text_color', 'black'))
         for r in l['waste']:
@@ -186,7 +186,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.4")
+    st.subheader("📐 Levyoptimoija v4.4.1")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -200,11 +200,8 @@ def nayta_levyoptimoija():
         input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
         with st.expander("📦 Hallitse vakiotuotteita"):
-            # Käytetään session_state.kirjasto suoraan editorissa
             df_v = pd.DataFrame(st.session_state.kirjasto)
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
-            
-            # Päivitetään muisti jos taulukkoa on muokattu
             if not edited_v.equals(df_v):
                 st.session_state.kirjasto = edited_v.to_dict('records')
                 st.rerun()
@@ -249,7 +246,6 @@ def nayta_levyoptimoija():
                     osat = [p for p in l['panels'] if not getattr(p, 'is_standard', False)]
                     st.write("**Tilausosat:**")
                     st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in osat]), hide_index=True)
-                    
                     vakiot = [p for p in l['panels'] if getattr(p, 'is_standard', False)]
                     if vakiot:
                         st.write("**Varastoon (Vakio):**")
@@ -261,7 +257,7 @@ def nayta_levyoptimoija():
                     fig, ax = plt.subplots(figsize=(7, 2.8))
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
-                        ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
+                        ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
                         if p.w > 120:
                             ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color=getattr(p, 'text_color', 'black'))
                     for r in l['waste']:
