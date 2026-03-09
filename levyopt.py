@@ -17,15 +17,29 @@ def get_contrast_color(hex_color):
     return "white" if luminance < 0.5 else "black"
 
 def piirra_paneelin_teksti(ax, p, base_fs=6):
+    """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
     teksti = f"{int(p.w)}x{int(p.h)}"
-    fs = min(base_fs, p.w / 18, p.h / 18)
-    fs = max(fs, 2.5) 
-    rotation = 90 if (p.h > p.w * 1.3) else 0
-    if p.w > 40 and p.h > 40:
+    
+    # Tarkistetaan asento: jos pala on kapea ja korkea, teksti pystyyn
+    pystyyn = p.h > p.w * 1.2
+    pituus = p.h if pystyyn else p.w
+    leveys = p.w if pystyyn else p.h
+    
+    # Dynaaminen fonttikoko (fs):
+    # Lasketaan fs siten, että tekstin pituus (n. 7-8 merkkiä) mahtuu palan pituuteen.
+    # 2440mm levyllä 7 tuuman kuvassa 1 piste on n. 5-7 yksikköä.
+    fs_leveys_raja = pituus / (len(teksti) * 0.75) / 6.5
+    fs_korkeus_raja = leveys / 22
+    
+    fs = min(base_fs, fs_leveys_raja, fs_korkeus_raja)
+    fs = max(fs, 2.0) # Alaraja, ettei teksti katoa täysin
+    
+    # Piirretään teksti vain jos pala on fyysisesti tarpeeksi suuri
+    if p.w > 45 and p.h > 45:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
                 ha='center', va='center', fontsize=fs,
                 fontweight='bold', color=getattr(p, 'text_color', 'black'),
-                rotation=rotation)
+                rotation=90 if pystyyn else 0)
 
 class Panel:
     def __init__(self, w, h, label="", is_standard=False):
@@ -77,14 +91,12 @@ class MaxRectsOptimizer:
     def _split_rects(self, sheet, x, y, w, h):
         new_free = []
         for r in sheet['free_rects']:
-            # Jos uusi pala leikkaa vapaan suorakaiteen kanssa
             if not (x >= r['x'] + r['w'] or x + w + self.kerf <= r['x'] or y >= r['y'] + r['h'] or y + h + self.kerf <= r['y']):
                 if x > r['x']: new_free.append({'x': r['x'], 'y': r['y'], 'w': x - r['x'], 'h': r['h']})
                 if x + w + self.kerf < r['x'] + r['w']: new_free.append({'x': x + w + self.kerf, 'y': r['y'], 'w': r['x'] + r['w'] - (x + w + self.kerf), 'h': r['h']})
                 if y > r['y']: new_free.append({'x': r['x'], 'y': r['y'], 'w': r['w'], 'h': y - r['y']})
                 if y + h + self.kerf < r['y'] + r['h']: new_free.append({'x': r['x'], 'y': y + h + self.kerf, 'w': r['w'], 'h': r['y'] + r['h'] - (y + h + self.kerf)})
-            else:
-                new_free.append(r)
+            else: new_free.append(r)
         sheet['free_rects'] = self._cleanup_rects(new_free)
 
     def _cleanup_rects(self, rects):
@@ -98,33 +110,27 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
-        """Uusittu logiikka: täyttää hukan loppuun asti."""
         active_lib = [item for item in library if item.get('Käytä', True)]
         if not active_lib: return
         sorted_lib = sorted(active_lib, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
-        
         for sheet in self.sheets:
-            while True: # Jatkaa niin kauan kuin jokin pala mahtuu
+            while True:
                 best_v_placement = None 
                 for rect in sheet['free_rects']:
                     for item in sorted_lib:
                         for rot in [False, True]:
                             w, h = (int(item['Lev']), int(item['Pit'])) if rot else (int(item['Pit']), int(item['Lev']))
                             if w <= rect['w'] and h <= rect['h']:
-                                # Valitaan sijoitus MaxRects-tyylillä (mahd. alas)
                                 score = rect['y'] + h
                                 if best_v_placement is None or score < best_v_placement[5]:
                                     best_v_placement = (rect, item, w, h, rot, score)
-                
                 if best_v_placement:
                     rect, item, w, h, rot, _ = best_v_placement
                     p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
                     p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
                     sheet['panels'].append(p)
-                    # TÄRKEÄÄ: Päivitetään vapaat suorakaiteet heti
                     self._split_rects(sheet, p.x, p.y, w, h)
-                else:
-                    break # Mikään vakiopala ei enää mahdu tälle levylle
+                else: break
 
 # --- KIRJASTO, PDF JA PARSE ---
 
@@ -193,7 +199,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v5.0 (Max-Fill)")
+    st.subheader("📐 Levyoptimoija v5.1")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
