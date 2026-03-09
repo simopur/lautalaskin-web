@@ -49,8 +49,8 @@ class MaxRectsOptimizer:
                             if best_fit is None or score < best_fit[5]:
                                 best_fit = (s_idx, rect, w, h, rot, score)
             if best_fit:
-                s_idx, rect, w, h, rot, _ = best_fit
-                self._place_pala(p, self.sheets[s_idx], rect, w, h, rot)
+                s_idx, r, w, h, rot, _ = best_fit
+                self._place_pala(p, self.sheets[s_idx], r, w, h, rot)
             else:
                 new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
                 self.sheets.append(new_sheet)
@@ -145,7 +145,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.0")
+    st.subheader("📐 Levyoptimoija v4.1")
 
     if 'opt_results' not in st.session_state:
         st.session_state.opt_results = None
@@ -170,10 +170,9 @@ def nayta_levyoptimoija():
             st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
             st.rerun()
     else:
-        st.info(f"Excel-syötössä käytetään automaattisesti varastolevyn leveyttä ({s_h} mm).")
         raw_data = st.text_area("Liitä Excel-data (Nimi, Pit, Lev, Täysiä, Jatko, Kpl):")
         if st.button("Optimoi Excel-data", type="primary"):
-            palat = parse_excel_input(raw_data, s_h) # S_h korvaa aiemman f_w:n
+            palat = parse_excel_input(raw_data, s_h)
             if palat:
                 opt = MaxRectsOptimizer(s_w, s_h, kerf)
                 opt.optimize(palat)
@@ -209,8 +208,7 @@ def nayta_levyoptimoija():
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
                         if p.w > 120:
-                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', 
-                                    fontsize=6, fontweight='bold', color=p.text_color)
+                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=p.text_color)
                     for r in l['waste']:
                         kaikki_hukkapalat.append({'L': r['w'], 'K': r['h'], 'lkm': l['count']})
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
