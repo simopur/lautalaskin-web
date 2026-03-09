@@ -11,20 +11,28 @@ from fpdf import FPDF
 # --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
+    """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
     return "white" if luminance < 0.5 else "black"
 
 def piirra_paneelin_teksti(ax, p, base_fs=6):
+    """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
     teksti = f"{int(p.w)}x{int(p.h)}"
+    
+    # Tarkistetaan asento: jos pala on kapea ja korkea, teksti pystyyn
     pystyyn = p.h > p.w * 1.2
     pituus = p.h if pystyyn else p.w
     leveys = p.w if pystyyn else p.h
+    
+    # Dynaaminen fonttikoko (fs)
     fs_leveys_raja = pituus / (len(teksti) * 0.7) / 6.0
     fs_korkeus_raja = leveys / 20
+    
     fs = min(base_fs, fs_leveys_raja, fs_korkeus_raja)
     fs = max(fs, 2.0) 
+    
     if p.w > 45 and p.h > 45:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
                 ha='center', va='center', fontsize=fs,
@@ -100,9 +108,11 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
+        """Täyttää hukan priorisoiden suurimpia vakiokokoja."""
         active_lib = [item for item in library if item.get('Käytä', True) and int(item.get('Pit', 0)) > 0 and int(item.get('Lev', 0)) > 0]
         if not active_lib: return
         sorted_lib = sorted(active_lib, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
+        
         for sheet in self.sheets:
             placed_on_sheet = True
             while placed_on_sheet:
@@ -190,7 +200,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v5.4")
+    st.subheader("📐 Levyoptimoija v5.5")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -211,14 +221,19 @@ def nayta_levyoptimoija():
         with st.expander("📦 Hallitse vakiotuotteita"):
             df_v = pd.DataFrame(st.session_state.kirjasto)
             if not df_v.empty:
+                # Muutetaan sarakkeet numeerisiksi ja korvataan tyhjät nollalla (estää kaatumisen)
                 df_v["Pit"] = pd.to_numeric(df_v["Pit"], errors='coerce').fillna(0).astype(int)
                 df_v["Lev"] = pd.to_numeric(df_v["Lev"], errors='coerce').fillna(0).astype(int)
                 if 'Käytä' not in df_v.columns: df_v['Käytä'] = True
                 df_v = df_v[['Käytä', 'Nimi', 'Pit', 'Lev']]
+            
+            # Manuaalinen päivitys nopeampaa muokkausta varten
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
-            if not edited_v.equals(df_v):
+            if st.button("Päivitä muutokset käyttöön"):
                 st.session_state.kirjasto = edited_v.to_dict('records')
+                st.success("Lista päivitetty!")
                 st.rerun()
+
             st.divider()
             json_str = json.dumps(st.session_state.kirjasto, indent=4)
             st.download_button(label="📥 Lataa vakiokoot.json", data=json_str, file_name="vakiokoot.json", mime="application/json")
@@ -246,12 +261,11 @@ def nayta_levyoptimoija():
         res = st.session_state.opt_results
         sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
         
-        # --- UUSI METRIIKKAPANEELI YLÄLAIDASSA ---
+        # --- METRIIKAT ---
         total_used_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if not getattr(p, 'is_standard', False)) / 1e6
         total_standard_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if getattr(p, 'is_standard', False)) / 1e6
         total_stock_area = (len(res['sheets']) * sw * sh) / 1e6
         
-        # Laskennat prosenteille
         order_yield_pct = (total_used_area / total_stock_area * 100) if total_stock_area > 0 else 0
         total_yield_pct = ((total_used_area + total_standard_area) / total_stock_area * 100) if total_stock_area > 0 else 0
         waste_pct = 100 - total_yield_pct
@@ -260,14 +274,11 @@ def nayta_levyoptimoija():
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Levyjä yhteensä", f"{len(res['sheets'])} kpl")
         c2.metric("Tilausten hyöty", f"{order_yield_pct:.1f} %")
-        
-        # Jos täyttö on käytössä, näytetään parannus
         if do_fill and total_standard_area > 0:
             parannus = total_yield_pct - order_yield_pct
             c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %", f"+{parannus:.1f} % vakioista")
         else:
             c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %")
-            
         c4.metric("Lopullinen hukka", f"{waste_pct:.1f} %", f"{(total_stock_area - total_used_area - total_standard_area):.3f} m²", delta_color="inverse")
         
         if total_standard_area > 0:
