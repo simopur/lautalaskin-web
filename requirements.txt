@@ -1,3 +1,4 @@
 streamlit
 matplotlib
 fpdf2
+pandas
