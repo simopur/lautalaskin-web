@@ -18,7 +18,7 @@ for key, val in DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- VISUALISOINTI ---
+# --- VISUALISOINTI: LAUTAJAKO ---
 def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot, title):
     fig, ax = plt.subplots(figsize=(12, 3)) 
     jaot = [malli_a, malli_b, malli_a, malli_b, malli_a]
@@ -54,6 +54,7 @@ def piirra_lautajako(malli_a, malli_b, ulkopituus, nostot, title):
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
+# --- VISUALISOINTI: JALAKSET ---
 def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
     fig, ax = plt.subplots(figsize=(12, 1.5 + len(kerrokset_data)*0.5))
     colors = ['#8e44ad', '#2980b9', '#27ae60']
@@ -70,13 +71,13 @@ def piirra_jalasjako(kerrokset_data, kokonaispituus, min_v):
             if j < len(kerros) - 1:
                 ax.plot([cx, cx], [y_pos, y_pos + l_h], color='black', linewidth=3)
     ax.set_xlim(-100, kokonaispituus + 100); ax.set_ylim(-20, len(kerrokset_data)*(l_h+v) + 20); ax.set_aspect('equal')
-    ax.set_title(f"Jalasrakenne (Minimi vierekkäinen saumaväli: {min_v} mm)", fontsize=10, fontweight='bold')
+    ax.set_title(f"Jalasrakenne (Pienin vierekkäinen saumaväli: {min_v} mm)", fontsize=10, fontweight='bold')
     ax.set_yticks([(l_h/2) + k*(l_h+v) for k in range(len(kerrokset_data))])
     ax.set_yticklabels([f"K{k+1}" for k in range(len(kerrokset_data))], fontsize=8)
     for spine in ax.spines.values(): spine.set_visible(False)
     st.pyplot(fig)
 
-# --- LASKENTALAGIIKKA: LATTIAPOHJA ---
+# --- LASKENTALAGIIKKA: LAUTAJAKO ---
 def etsi_reitit_f(n_idx, reitti, max_l, pisteet, sallitut):
     if pisteet[-1] - pisteet[n_idx] <= max_l:
         if n_idx != len(pisteet) - 2: return [reitti + [len(pisteet)-1]]
@@ -101,12 +102,11 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
     
     valmiit.sort(key=lambda x: (len(x['palat']), -x['l_score']))
     parit = []
-    nahtyat_jaot = []
+    nahtyat_jaot = [] 
 
     for m_a in valmiit[:100]:
         jako_tunniste = tuple(sorted(m_a['palat']))
         if jako_tunniste in nahtyat_jaot: continue
-        
         m_b, is_mirror = None, False
         
         rev_palat = m_a['palat'][::-1]
@@ -134,12 +134,10 @@ def yrita_laskea_pari_f(m_l, all_p, sallitut):
                     a_set = set(m_a['idx'][1:-1])
                     if all(b not in a_set and b-1 not in a_set and b+1 not in a_set for b in b_idx):
                         m_b = ehd; break
-        
         if m_b:
             parit.append({'a': m_a, 'b': m_b, 'is_mirror': is_mirror})
             nahtyat_jaot.append(jako_tunniste)
             if len(parit) >= 2: break
-            
     return parit
 
 # --- LASKENTALAGIIKKA: JALAKSET ---
@@ -172,11 +170,11 @@ def laske_jalas_mestarimalli(j_p, j_l, kerrokset):
     return data, int(min_v) if min_v != float('inf') else 0
 
 # --- KÄYTTÖLIITTYMÄ ---
-st.set_page_config(page_title="Pakkauslaskin v4.8", layout="wide")
-st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.8")
+st.set_page_config(page_title="Pakkauslaskin v4.9", layout="wide")
+st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.9")
 
-if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
-    st.rerun()
+if st.button("🗑️ Tyhjennä kaikki kentät"):
+    tyhjenna_kaikki()
 
 t1, t2 = st.tabs(["📊 Lautajako", "🪵 Jalakset"])
 
@@ -197,13 +195,14 @@ with t1:
         
         # --- SYMMETRIATARKISTUS ---
         if nostot:
-            gap_start = nostot[0]
-            gap_end = f_ulp - nostot[-1]
-            internal_gaps = [nostot[i+1] - nostot[i] for i in range(len(nostot)-1)]
+            alku_vali = nostot[0]
+            loppu_vali = f_ulp - nostot[-1]
+            keskivalit = [nostot[i+1] - nostot[i] for i in range(len(nostot)-1)]
             
-            # Tarkistetaan onko alku- ja loppuväli samat sekä onko välit keskellä symmetriset
-            if abs(gap_start - gap_end) > 1 or internal_gaps != internal_gaps[::-1]:
-                st.warning("⚠️ **Huom! Trukkinostojen jako ei ole symmetrinen.** Tarkista, oletko syöttänyt arvot oikein.")
+            if abs(alku_vali - loppu_vali) > 1 or keskivalit != keskivalit[::-1]:
+                st.warning("⚠️ **Huom! Trukkinostojen jako ei ole symmetrinen.** Tarkista syöttämäsi arvot.")
+            else:
+                st.success("✅ Trukkinostojen jako on symmetrinen.")
 
         sallitut = list(range(2, len(all_p) - 2))
         parit = yrita_laskea_pari_f(f_max, all_p, sallitut)
@@ -214,4 +213,35 @@ with t1:
                 m_a, m_b = pari['a'], pari['b']
                 t_str = f"Vaihtoehto {idx+1}: " + ("Peilikuvajako" if pari['is_mirror'] else "Eri pituuksilla")
                 piirra_lautajako(m_a, m_b, f_ulp, nostot, t_str)
-                col
+                colA, colB = st.columns(2)
+                with colA: st.info(f"**Malli A:** {' + '.join(map(str, m_a['palat']))} mm")
+                with colB: st.info(f"**Malli B:** {' + '.join(map(str, m_b['palat']))} mm")
+                st.divider()
+        else:
+            test_l, loytyi = f_max, False
+            while test_l < f_ulp:
+                test_l += 10
+                res = yrita_laskea_pari_f(test_l, all_p, sallitut)
+                if res: loytyi = True; break
+            msg = "Lisää yksi trukkinosto tai käytä pidempää lautaa, jako ei mahdollinen."
+            if loytyi: st.error(f"❌ {msg}\n\n**Vaadittu vähimmäispituus on {int(test_l)} mm.**")
+            else: st.error(f"❌ {msg}")
+
+with t2:
+    st.header("Jalas-laskenta (Mestarimalli)")
+    cj1, cj2 = st.columns(2)
+    with cj1:
+        j_p = st.number_input("Jalaksen kokonaispituus mm", key="j_jalas_p")
+        j_l = st.number_input("Käytettävän materiaalin mitta mm", key="j_lauta_p")
+    with cj2:
+        j_k = st.number_input("Jalasmäärä (1-3 kerrosta)", value=3, min_value=1, max_value=3, key="j_kerrokset")
+
+    if st.button("Laske jalasten jako", type="primary"):
+        if j_l >= j_p: 
+            st.info("Jalas voidaan tehdä yhdestä puusta.")
+        else:
+            d, v = laske_jalas_mestarimalli(j_p, j_l, j_k)
+            st.success("Jalas laskettu optimaalisesti.")
+            piirra_jalasjako(d, j_p, v)
+            for i, kerros in enumerate(d):
+                st.info(f"**Kerros {i+1}:** {' + '.join(map(str, kerros))} mm")
