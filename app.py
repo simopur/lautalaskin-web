@@ -1,13 +1,21 @@
 import streamlit as st
-# Tuodaan funktiot muista tiedostoista
 from lautajako import nayta_lautajako
 from jalakset import nayta_jalakset
 from levyopt import nayta_levyoptimoija
 
-st.set_page_config(page_title="Puutyökalut", layout="wide")
+st.set_page_config(page_title="Pakkauslaskin v4.9", layout="wide")
 
-# Luodaan kolme välilehteä
-tab1, tab2, tab3 = st.tabs(["🪵 Lautajako", "🦶 Jalasten laskenta", "📐 Levyoptimoija"])
+# Sivupalkin painike kenttien tyhjentämiseen
+with st.sidebar:
+    if st.button("🗑️ Tyhjennä kaikki kentät"):
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        st.rerun()
+
+st.title("🏗️ Pakkausvalmistuksen Työkalut")
+
+# Välilehdet
+tab1, tab2, tab3 = st.tabs(["📊 Lautajako", "🪵 Jalakset", "📐 Levyoptimoija"])
 
 with tab1:
     nayta_lautajako()
