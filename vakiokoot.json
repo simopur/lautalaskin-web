@@ -1,0 +1,22 @@
+[
+    {
+        "Nimi": "Talla 200",
+        "Pit": 200,
+        "Lev": 200
+    },
+    {
+        "Nimi": "Talla 400",
+        "Pit": 400,
+        "Lev": 400
+    },
+    {
+        "Nimi": "Tukisuikale 1200",
+        "Pit": 1200,
+        "Lev": 100
+    },
+    {
+        "Nimi": "Kulmapala",
+        "Pit": 150,
+        "Lev": 150
+    }
+]
