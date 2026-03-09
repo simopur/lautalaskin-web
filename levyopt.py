@@ -91,8 +91,8 @@ def nayta_levyoptimoija():
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        s_w = st.number_input("Varastolevyn pituus (mm)", value=2700, key="stock_w")
-        s_h = st.number_input("Varastolevyn leveys (mm)", value=1200, key="stock_h")
+        s_w = st.number_input("Varastolevyn pituus (mm)", value=2440, key="stock_w")
+        s_h = st.number_input("Varastolevyn leveys (mm)", value=1220, key="stock_h")
         full_w = st.number_input("Täyden suikaleen leveys (mm)", value=1220, key="full_w")
         kerf = st.slider("Terän hukka (mm)", 0, 10, 4, key="kerf_val")
         excel_input = st.text_area("Liitä Excel-tiedot:", height=200)
