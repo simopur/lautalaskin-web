@@ -11,6 +11,7 @@ from fpdf import FPDF
 # --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
+    """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -19,16 +20,11 @@ def get_contrast_color(hex_color):
 def piirra_paneelin_teksti(ax, p, base_fs=6):
     """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
     teksti = f"{int(p.w)}x{int(p.h)}"
-    
-    # Lasketaan optimaalinen fonttikoko (pienempi pituussuunta määrää)
-    # Suhteutetaan fontti palan mittoihin
+    # Dynaaminen fonttikoko palan mittojen mukaan
     fs = min(base_fs, p.w / 18, p.h / 18)
-    fs = max(fs, 2.5) # Alaraja, ettei mene lukukelvottomaksi
-    
-    # Jos pala on selkeästi kapea ja korkea, käännetään teksti 90 astetta
+    fs = max(fs, 2.5) 
+    # Käännetään teksti pystyyn jos pala on kapea ja korkea
     rotation = 90 if (p.h > p.w * 1.3) else 0
-    
-    # Piirretään teksti vain jos pala on tarpeeksi suuri näkyäkseen
     if p.w > 40 and p.h > 40:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
                 ha='center', va='center', fontsize=fs,
@@ -37,13 +33,13 @@ def piirra_paneelin_teksti(ax, p, base_fs=6):
 
 class Panel:
     def __init__(self, w, h, label="", is_standard=False):
-        self.w, self.h = int(w), int(h) # Pakotetaan tasamillimetrit
+        self.w, self.h = int(w), int(h)
         self.label = label
         self.x, self.y = 0, 0
         self.is_rotated = False
         self.is_standard = is_standard
         if is_standard:
-            self.color = "#95a5a6" 
+            self.color = "#95a5a6" # Harmaa vakiokokoja varten
         else:
             dims = sorted([self.w, self.h])
             tag = f"{dims[0]}x{dims[1]}"
@@ -52,15 +48,12 @@ class Panel:
 
 class MaxRectsOptimizer:
     def __init__(self, stock_w, stock_h, kerf):
-        self.stock_w = int(stock_w)
-        self.stock_h = int(stock_h)
-        self.kerf = int(kerf)
+        self.stock_w = int(stock_w); self.stock_h = int(stock_h); self.kerf = int(kerf)
         self.sheets = []
 
     def optimize(self, panels):
         sorted_panels = sorted(panels, key=lambda p: p.w * p.h, reverse=True)
-        for p in sorted_panels:
-            self._place_pala_best_fit(p)
+        for p in sorted_panels: self._place_pala_best_fit(p)
 
     def _place_pala_best_fit(self, p):
         best_fit = None 
@@ -72,14 +65,12 @@ class MaxRectsOptimizer:
                         score = rect['y'] + h 
                         if best_fit is None or score < best_fit[5]:
                             best_fit = (s_idx, rect, w, h, rot, score)
-        
         if best_fit:
             s_idx, rect, w, h, rot, _ = best_fit
             self._execute_placement(p, self.sheets[s_idx], rect, w, h, rot)
         else:
             new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
-            self.sheets.append(new_sheet)
-            w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
+            self.sheets.append(new_sheet); w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
             self._execute_placement(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
 
     def _execute_placement(self, p, sheet, used_rect, w, h, rot):
@@ -90,8 +81,7 @@ class MaxRectsOptimizer:
     def _split_rects(self, sheet, x, y, w, h):
         new_free = []
         for r in sheet['free_rects']:
-            if not (x >= r['x'] + r['w'] or x + w + self.kerf <= r['x'] or 
-                    y >= r['y'] + r['h'] or y + h + self.kerf <= r['y']):
+            if not (x >= r['x'] + r['w'] or x + w + self.kerf <= r['x'] or y >= r['y'] + r['h'] or y + h + self.kerf <= r['y']):
                 if x > r['x']: new_free.append({'x': r['x'], 'y': r['y'], 'w': x - r['x'], 'h': r['h']})
                 if x + w + self.kerf < r['x'] + r['w']: new_free.append({'x': x + w + self.kerf, 'y': r['y'], 'w': r['x'] + r['w'] - (x + w + self.kerf), 'h': r['h']})
                 if y > r['y']: new_free.append({'x': r['x'], 'y': r['y'], 'w': r['w'], 'h': y - r['y']})
@@ -122,11 +112,8 @@ class MaxRectsOptimizer:
                             if w <= rect['w'] and h <= rect['h']:
                                 p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
                                 p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
-                                sheet['panels'].append(p)
-                                sheet['free_rects'].pop(r_idx)
-                                self._split_rects(sheet, p.x, p.y, w, h)
-                                added_any = True
-                                break
+                                sheet['panels'].append(p); sheet['free_rects'].pop(r_idx); self._split_rects(sheet, p.x, p.y, w, h)
+                                added_any = True; break
                         if added_any: break
                     if added_any: break
 
@@ -151,9 +138,29 @@ def group_layouts(sheets):
         for l in unique:
             if l['fp'] == fingerprint:
                 l['count'] += 1; found = True; break
-        if not found:
-            unique.append({'panels': s['panels'], 'waste': s['free_rects'], 'fp': fingerprint, 'count': 1})
+        if not found: unique.append({'panels': s['panels'], 'waste': s['free_rects'], 'fp': fingerprint, 'count': 1})
     return unique
+
+def create_pdf_bytes(layouts, s_w, s_h):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=10)
+    w_mm, h_mm = 90, 45 
+    for i, l in enumerate(layouts):
+        if i % 8 == 0:
+            pdf.add_page(); pdf.set_font("helvetica", "B", 14); pdf.cell(0, 8, f"Sahauslistat - Sivu {int(i/8)+1}", ln=True, align="C")
+        fig, ax = plt.subplots(figsize=(7, 3))
+        ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
+        for p in l['panels']:
+            ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
+            piirra_paneelin_teksti(ax, p)
+        for r in l['waste']:
+            ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
+        ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
+        img_buf = io.BytesIO(); plt.savefig(img_buf, format='png', dpi=180, bbox_inches='tight'); plt.close(fig)
+        row, col = (i % 8) // 2, (i % 8) % 2
+        x_p, y_p = 10 + (col * 100), 20 + (row * 65)
+        pdf.set_xy(x_p, y_p - 6); pdf.set_font("helvetica", "B", 10); pdf.cell(w_mm, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False); pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
+    return bytes(pdf.output())
 
 def parse_excel_input(text, full_w):
     panels = []
@@ -162,49 +169,18 @@ def parse_excel_input(text, full_w):
         parts = line.split('\t')
         if len(parts) < 6: continue
         try:
-            nimi = str(parts[0]).strip()
-            pituus = int(float(str(parts[1]).replace(',', '.')))
-            taysi_lkm = int(float(str(parts[3]).replace(',', '.')))
-            jatko_w = int(float(str(parts[4]).replace(',', '.')))
-            kpl = int(float(str(parts[5]).replace(',', '.')))
+            nimi, pituus = str(parts[0]).strip(), int(float(str(parts[1]).replace(',', '.')))
+            taysi_lkm, jatko_w, kpl = int(float(str(parts[3]))), int(float(str(parts[4]))), int(float(str(parts[5])))
             for _ in range(kpl * taysi_lkm): panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
             if jatko_w > 0:
                 for _ in range(kpl): panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
         except: continue
     return panels
 
-def create_pdf_bytes(layouts, s_w, s_h):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=10)
-    w_mm, h_mm = 90, 45 
-    for i, l in enumerate(layouts):
-        if i % 8 == 0:
-            pdf.add_page()
-            pdf.set_font("helvetica", "B", 14)
-            pdf.cell(0, 8, f"Sahauslistat - Sivu {int(i/8)+1}", ln=True, align="C")
-        fig, ax = plt.subplots(figsize=(7, 3))
-        ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
-        for p in l['panels']:
-            ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
-            piirra_paneelin_teksti(ax, p, base_fs=6)
-        for r in l['waste']:
-            ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
-        ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
-        img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png', dpi=180, bbox_inches='tight')
-        plt.close(fig)
-        row, col = (i % 8) // 2, (i % 8) % 2
-        x_p, y_p = 10 + (col * 100), 20 + (row * 65)
-        pdf.set_xy(x_p, y_p - 6)
-        pdf.set_font("helvetica", "B", 10)
-        pdf.cell(w_mm, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False)
-        pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
-    return bytes(pdf.output())
-
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.5 (Puhdas asettelu)")
+    st.subheader("📐 Levyoptimoija v4.7")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -217,15 +193,33 @@ def nayta_levyoptimoija():
         do_fill = st.checkbox("Täytä hukka vakiokooilla", value=True)
         input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
+        st.divider()
+        if st.button("🗑️ Nollaa laskenta"):
+            st.session_state.opt_results = None
+            st.rerun()
+
         with st.expander("📦 Hallitse vakiotuotteita"):
-            # Pakotetaan kirjaston koot kokonaisluvuiksi
             df_v = pd.DataFrame(st.session_state.kirjasto)
-            df_v["Pit"] = df_v["Pit"].astype(int)
-            df_v["Lev"] = df_v["Lev"].astype(int)
+            # Pakotetaan tyypit kokonaisluvuiksi näytössä
+            if not df_v.empty:
+                df_v["Pit"] = df_v["Pit"].astype(int)
+                df_v["Lev"] = df_v["Lev"].astype(int)
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
+            
             if not edited_v.equals(df_v):
                 st.session_state.kirjasto = edited_v.to_dict('records')
                 st.rerun()
+
+            # --- TALLENNUS GitHubia varten ---
+            st.divider()
+            json_str = json.dumps(st.session_state.kirjasto, indent=4)
+            st.download_button(
+                label="📥 Lataa vakiokoot.json",
+                data=json_str,
+                file_name="vakiokoot.json",
+                mime="application/json",
+                help="Korvaa GitHubissa oleva tiedosto tällä tallentaaksesi koot pysyvästi."
+            )
 
     palat = []
     if input_type == "Manuaalinen":
@@ -234,29 +228,22 @@ def nayta_levyoptimoija():
         if st.button("Laske Optimointi", type="primary"):
             for _, r in ed.iterrows():
                 for _ in range(int(r["Kpl"])): palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
-            
-            opt = MaxRectsOptimizer(s_w, s_h, kerf)
-            opt.optimize(palat)
+            opt = MaxRectsOptimizer(s_w, s_h, kerf); opt.optimize(palat)
             if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto)
-            st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
-            st.rerun()
+            st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}; st.rerun()
     else:
-        raw_data = st.text_area("Liitä Excel-data:")
+        raw_data = st.text_area("Liitä Excel-data (Nimi, Pit, Lev, Täysiä, Jatko, Kpl):")
         if st.button("Optimoi Excel-data", type="primary"):
             palat = parse_excel_input(raw_data, s_h)
             if palat:
-                opt = MaxRectsOptimizer(s_w, s_h, kerf)
-                opt.optimize(palat)
+                opt = MaxRectsOptimizer(s_w, s_h, kerf); opt.optimize(palat)
                 if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto)
-                st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
-                st.rerun()
+                st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}; st.rerun()
 
     if st.session_state.opt_results:
         res = st.session_state.opt_results
-        sw, sh = res['stock']
-        layouts = group_layouts(res['sheets'])
+        sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
         st.divider()
-        
         pdf_data = create_pdf_bytes(layouts, sw, sh)
         st.download_button(label="📥 Lataa PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
 
@@ -271,16 +258,14 @@ def nayta_levyoptimoija():
                     if vakiot:
                         st.write("**Varastoon (Vakio):**")
                         v_df = pd.DataFrame([{"Osa": p.label, "W": int(p.w), "H": int(p.h)} for p in vakiot])
-                        v_koonti = v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl")
-                        st.dataframe(v_koonti, hide_index=True)
+                        st.dataframe(v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl"), hide_index=True)
 
                 with c_vis2:
                     fig, ax = plt.subplots(figsize=(7, 2.8))
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=getattr(p, 'color', '#ffffff'), edgecolor='black', alpha=0.9, lw=0.4))
-                        piirra_paneelin_teksti(ax, p, base_fs=5.5)
+                        piirra_paneelin_teksti(ax, p)
                     for r in l['waste']:
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
-                    ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off')
-                    st.pyplot(fig); plt.close()
+                    ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off'); st.pyplot(fig); plt.close()
