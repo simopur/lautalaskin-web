@@ -1,22 +1,44 @@
 [
     {
-        "Nimi": "Talla 200",
-        "Pit": 200,
-        "Lev": 200
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "Bufab sivu",
+        "Pit": 490,
+        "Lev": 180
     },
     {
-        "Nimi": "Talla 400",
-        "Pit": 400,
-        "Lev": 400
-    },
-    {
-        "Nimi": "Tukisuikale 1200",
-        "Pit": 1200,
-        "Lev": 100
-    },
-    {
-        "Nimi": "Kulmapala",
-        "Pit": 150,
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "Bufab kansi",
+        "Pit": 490,
         "Lev": 150
+    },
+    {
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "Konepaja pohja/kansi",
+        "Pit": 620,
+        "Lev": 420
+    },
+    {
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "Konepaja sivu",
+        "Pit": 620,
+        "Lev": 300
+    },
+    {
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "Konepaja p\u00e4\u00e4ty",
+        "Pit": 400,
+        "Lev": 300
+    },
+    {
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "EUR-kansi",
+        "Pit": 1200,
+        "Lev": 800
+    },
+    {
+        "K\u00e4yt\u00e4": true,
+        "Nimi": "1/2 EUR-kansi",
+        "Pit": 800,
+        "Lev": 600
     }
 ]
