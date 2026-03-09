@@ -20,10 +20,8 @@ def get_contrast_color(hex_color):
 def piirra_paneelin_teksti(ax, p, base_fs=6):
     """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
     teksti = f"{int(p.w)}x{int(p.h)}"
-    # Dynaaminen fonttikoko palan mittojen mukaan
     fs = min(base_fs, p.w / 18, p.h / 18)
     fs = max(fs, 2.5) 
-    # Käännetään teksti pystyyn jos pala on kapea ja korkea
     rotation = 90 if (p.h > p.w * 1.3) else 0
     if p.w > 40 and p.h > 40:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
@@ -39,7 +37,7 @@ class Panel:
         self.is_rotated = False
         self.is_standard = is_standard
         if is_standard:
-            self.color = "#95a5a6" # Harmaa vakiokokoja varten
+            self.color = "#95a5a6" 
         else:
             dims = sorted([self.w, self.h])
             tag = f"{dims[0]}x{dims[1]}"
@@ -180,7 +178,7 @@ def parse_excel_input(text, full_w):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.7")
+    st.subheader("📐 Levyoptimoija v4.8")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -200,7 +198,6 @@ def nayta_levyoptimoija():
 
         with st.expander("📦 Hallitse vakiotuotteita"):
             df_v = pd.DataFrame(st.session_state.kirjasto)
-            # Pakotetaan tyypit kokonaisluvuiksi näytössä
             if not df_v.empty:
                 df_v["Pit"] = df_v["Pit"].astype(int)
                 df_v["Lev"] = df_v["Lev"].astype(int)
@@ -210,16 +207,9 @@ def nayta_levyoptimoija():
                 st.session_state.kirjasto = edited_v.to_dict('records')
                 st.rerun()
 
-            # --- TALLENNUS GitHubia varten ---
             st.divider()
             json_str = json.dumps(st.session_state.kirjasto, indent=4)
-            st.download_button(
-                label="📥 Lataa vakiokoot.json",
-                data=json_str,
-                file_name="vakiokoot.json",
-                mime="application/json",
-                help="Korvaa GitHubissa oleva tiedosto tällä tallentaaksesi koot pysyvästi."
-            )
+            st.download_button(label="📥 Lataa vakiokoot.json", data=json_str, file_name="vakiokoot.json", mime="application/json")
 
     palat = []
     if input_type == "Manuaalinen":
@@ -244,6 +234,23 @@ def nayta_levyoptimoija():
         res = st.session_state.opt_results
         sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
         st.divider()
+        
+        # --- METRIIKAT (Hukkaprosentti mukana) ---
+        total_used_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if not getattr(p, 'is_standard', False)) / 1e6
+        total_standard_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if getattr(p, 'is_standard', False)) / 1e6
+        total_stock_area = (len(res['sheets']) * sw * sh) / 1e6
+        
+        yield_pct = (total_used_area / total_stock_area * 100) if total_stock_area > 0 else 0
+        waste_pct = 100 - yield_pct
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Levyjä", f"{len(res['sheets'])} kpl")
+        m2.metric("Hyötykäyttö", f"{yield_pct:.1f} %")
+        m3.metric("Hukkaprosentti", f"{waste_pct:.1f} %", f"{(total_stock_area-total_used_area):.3f} m²", delta_color="inverse")
+        
+        if total_standard_area > 0:
+            st.info(f"💡 Hukasta pelastettu varastoon: **{total_standard_area:.3f} m²** vakiopaloina.")
+
         pdf_data = create_pdf_bytes(layouts, sw, sh)
         st.download_button(label="📥 Lataa PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
 
