@@ -100,7 +100,6 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
-        # Suodatetaan pois tyhjät tai nolla-arvot
         active_lib = [item for item in library if item.get('Käytä', True) and int(item.get('Pit', 0)) > 0 and int(item.get('Lev', 0)) > 0]
         if not active_lib: return
         sorted_lib = sorted(active_lib, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
@@ -171,7 +170,6 @@ def parse_excel_input(text, full_w):
 def create_pdf_bytes(layouts, s_w, s_h):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=10)
-    w_mm, h_mm = 90, 45 
     for i, l in enumerate(layouts):
         if i % 8 == 0:
             pdf.add_page(); pdf.set_font("helvetica", "B", 14); pdf.cell(0, 8, f"Sahauslistat - Sivu {int(i/8)+1}", ln=True, align="C")
@@ -186,13 +184,13 @@ def create_pdf_bytes(layouts, s_w, s_h):
         img_buf = io.BytesIO(); plt.savefig(img_buf, format='png', dpi=180, bbox_inches='tight'); plt.close(fig)
         row, col = (i % 8) // 2, (i % 8) % 2
         x_p, y_p = 10 + (col * 100), 20 + (row * 65)
-        pdf.set_xy(x_p, y_p - 6); pdf.set_font("helvetica", "B", 10); pdf.cell(w_mm, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False); pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
+        pdf.set_xy(x_p, y_p - 6); pdf.set_font("helvetica", "B", 10); pdf.cell(90, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False); pdf.image(img_buf, x=x_p, y=y_p, w=90)
     return bytes(pdf.output())
 
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v5.3")
+    st.subheader("📐 Levyoptimoija v5.4")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -211,21 +209,16 @@ def nayta_levyoptimoija():
             st.rerun()
 
         with st.expander("📦 Hallitse vakiotuotteita"):
-            # TURVALLINEN KÄSITTELY: Täytetään tyhjät nollalla ennen tyyppimuunnosta
             df_v = pd.DataFrame(st.session_state.kirjasto)
             if not df_v.empty:
-                # Muutetaan sarakkeet numeerisiksi ja korvataan NaN nollalla
                 df_v["Pit"] = pd.to_numeric(df_v["Pit"], errors='coerce').fillna(0).astype(int)
                 df_v["Lev"] = pd.to_numeric(df_v["Lev"], errors='coerce').fillna(0).astype(int)
                 if 'Käytä' not in df_v.columns: df_v['Käytä'] = True
                 df_v = df_v[['Käytä', 'Nimi', 'Pit', 'Lev']]
-            
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
-            
             if not edited_v.equals(df_v):
                 st.session_state.kirjasto = edited_v.to_dict('records')
                 st.rerun()
-
             st.divider()
             json_str = json.dumps(st.session_state.kirjasto, indent=4)
             st.download_button(label="📥 Lataa vakiokoot.json", data=json_str, file_name="vakiokoot.json", mime="application/json")
@@ -252,28 +245,42 @@ def nayta_levyoptimoija():
     if st.session_state.opt_results:
         res = st.session_state.opt_results
         sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
-        st.divider()
         
+        # --- UUSI METRIIKKAPANEELI YLÄLAIDASSA ---
         total_used_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if not getattr(p, 'is_standard', False)) / 1e6
         total_standard_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if getattr(p, 'is_standard', False)) / 1e6
         total_stock_area = (len(res['sheets']) * sw * sh) / 1e6
-        yield_pct = (total_used_area / total_stock_area * 100) if total_stock_area > 0 else 0
         
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Levyjä", f"{len(res['sheets'])} kpl")
-        m2.metric("Hyötykäyttö", f"{yield_pct:.1f} %")
-        m3.metric("Hukkaprosentti", f"{(100-yield_pct):.1f} %", f"{(total_stock_area-total_used_area):.3f} m²", delta_color="inverse")
+        # Laskennat prosenteille
+        order_yield_pct = (total_used_area / total_stock_area * 100) if total_stock_area > 0 else 0
+        total_yield_pct = ((total_used_area + total_standard_area) / total_stock_area * 100) if total_stock_area > 0 else 0
+        waste_pct = 100 - total_yield_pct
+
+        st.divider()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Levyjä yhteensä", f"{len(res['sheets'])} kpl")
+        c2.metric("Tilausten hyöty", f"{order_yield_pct:.1f} %")
+        
+        # Jos täyttö on käytössä, näytetään parannus
+        if do_fill and total_standard_area > 0:
+            parannus = total_yield_pct - order_yield_pct
+            c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %", f"+{parannus:.1f} % vakioista")
+        else:
+            c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %")
+            
+        c4.metric("Lopullinen hukka", f"{waste_pct:.1f} %", f"{(total_stock_area - total_used_area - total_standard_area):.3f} m²", delta_color="inverse")
         
         if total_standard_area > 0:
-            st.info(f"💡 Hukasta pelastettu varastoon: **{total_standard_area:.3f} m²** vakiopaloina.")
+            st.success(f"✅ Vakiokokoilla pelastettiin materiaalia: **{total_standard_area:.3f} m²**")
+        st.divider()
 
         pdf_data = create_pdf_bytes(layouts, sw, sh)
-        st.download_button(label="📥 Lataa PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
+        st.download_button(label="📥 Lataa sahauslistat PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
 
         for i, l in enumerate(layouts):
             with st.expander(f"Layout {chr(65+i)} — {l['count']} kpl", expanded=True):
-                c1, c2 = st.columns([1, 2.5])
-                with c1:
+                col_i, col_v = st.columns([1, 2.5])
+                with col_i:
                     osat = [p for p in l['panels'] if not getattr(p, 'is_standard', False)]
                     st.write("**Tilausosat:**")
                     st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{int(p.w)}x{int(p.h)}"} for p in osat]), hide_index=True)
@@ -282,7 +289,7 @@ def nayta_levyoptimoija():
                         st.write("**Varastoon (Vakio):**")
                         v_df = pd.DataFrame([{"Osa": p.label, "W": int(p.w), "H": int(p.h)} for p in vakiot])
                         st.dataframe(v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl"), hide_index=True)
-                with c2:
+                with col_v:
                     fig, ax = plt.subplots(figsize=(7, 2.8))
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
