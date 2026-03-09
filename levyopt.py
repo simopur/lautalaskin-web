@@ -8,22 +8,7 @@ import json
 import os
 from fpdf import FPDF
 
-# --- KIRJASTON HALLINTA ---
-
-KIRJASTO_TIEDOSTO = "vakiokoot.json"
-
-def lataa_kirjasto():
-    """Lataa vakiokoot tiedostosta tai palauttaa oletukset."""
-    if os.path.exists(KIRJASTO_TIEDOSTO):
-        with open(KIRJASTO_TIEDOSTO, "r") as f:
-            return json.load(f)
-    return [
-        {"Nimi": "Talla 200", "Pit": 200, "Lev": 200},
-        {"Nimi": "Suikale 1200", "Pit": 1200, "Lev": 100}
-    ]
-
-# --- AIEMMAT LUOKAT (Panel, MaxRectsOptimizer, group_layouts, get_contrast_color) ---
-# (Pidetään samana kuin v4.1, mutta lisätään kontrasti- ja PDF-parannukset)
+# --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
     hex_color = hex_color.lstrip('#')
@@ -32,18 +17,20 @@ def get_contrast_color(hex_color):
     return "white" if luminance < 0.5 else "black"
 
 class Panel:
-    def __init__(self, w, h, label=""):
+    def __init__(self, w, h, label="", is_standard=False):
         self.w, self.h = w, h
         self.label = label
         self.x, self.y = 0, 0
         self.is_rotated = False
-        dims = sorted([w, h])
-        tag = f"{dims[0]}x{dims[1]}"
-        self.color = "#" + hashlib.md5(tag.encode()).hexdigest()[:6]
+        self.is_standard = is_standard
+        # Vakiokoot ovat aina harmaita, tilausosat dynaamisia
+        if is_standard:
+            self.color = "#95a5a6" # Neutraali harmaa
+        else:
+            dims = sorted([w, h])
+            tag = f"{dims[0]}x{dims[1]}"
+            self.color = "#" + hashlib.md5(tag.encode()).hexdigest()[:6]
         self.text_color = get_contrast_color(self.color)
-
-# ... (MaxRectsOptimizer ja group_layouts pysyvät ennallaan) ...
-# (Lisätään ne tähän kopioitavaan versioon varmuuden vuoksi)
 
 class MaxRectsOptimizer:
     def __init__(self, stock_w, stock_h, kerf):
@@ -53,37 +40,45 @@ class MaxRectsOptimizer:
         self.sheets = []
 
     def optimize(self, panels):
+        # Vaihe 1: Optimoidaan varsinaiset tilausosat
         sorted_panels = sorted(panels, key=lambda p: p.w * p.h, reverse=True)
         for p in sorted_panels:
-            best_fit = None 
-            for s_idx, sheet in enumerate(self.sheets):
-                for rect in sheet['free_rects']:
-                    for rot in [False, True]:
-                        w, h = (p.h, p.w) if rot else (p.w, p.h)
-                        if w <= rect['w'] and h <= rect['h']:
-                            score = rect['y'] + h 
-                            if best_fit is None or score < best_fit[5]:
-                                best_fit = (s_idx, rect, w, h, rot, score)
-            if best_fit:
-                s_idx, r, w, h, rot, _ = best_fit
-                self._place_pala(p, self.sheets[s_idx], r, w, h, rot)
-            else:
-                new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
-                self.sheets.append(new_sheet)
-                w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
-                self._place_pala(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
+            self._place_pala_best_fit(p)
 
-    def _place_pala(self, p, sheet, used_rect, w, h, rot):
+    def _place_pala_best_fit(self, p):
+        best_fit = None 
+        for s_idx, sheet in enumerate(self.sheets):
+            for rect in sheet['free_rects']:
+                for rot in [False, True]:
+                    w, h = (p.h, p.w) if rot else (p.w, p.h)
+                    if w <= rect['w'] and h <= rect['h']:
+                        score = rect['y'] + h 
+                        if best_fit is None or score < best_fit[5]:
+                            best_fit = (s_idx, rect, w, h, rot, score)
+        
+        if best_fit:
+            s_idx, rect, w, h, rot, _ = best_fit
+            self._execute_placement(p, self.sheets[s_idx], rect, w, h, rot)
+        else:
+            new_sheet = {'panels': [], 'free_rects': [{'x': 0, 'y': 0, 'w': self.stock_w, 'h': self.stock_h}]}
+            self.sheets.append(new_sheet)
+            w, h, rot = (p.w, p.h, False) if p.w <= self.stock_w and p.h <= self.stock_h else (p.h, p.w, True)
+            self._execute_placement(p, new_sheet, new_sheet['free_rects'][0], w, h, rot)
+
+    def _execute_placement(self, p, sheet, used_rect, w, h, rot):
         p.x, p.y, p.w, p.h, p.is_rotated = used_rect['x'], used_rect['y'], w, h, rot
         sheet['panels'].append(p)
+        self._split_rects(sheet, p.x, p.y, w, h)
+
+    def _split_rects(self, sheet, x, y, w, h):
         new_free = []
         for r in sheet['free_rects']:
-            if not (p.x >= r['x'] + r['w'] or p.x + w + self.kerf <= r['x'] or 
-                    p.y >= r['y'] + r['h'] or p.y + h + self.kerf <= r['y']):
-                if p.x > r['x']: new_free.append({'x': r['x'], 'y': r['y'], 'w': p.x - r['x'], 'h': r['h']})
-                if p.x + w + self.kerf < r['x'] + r['w']: new_free.append({'x': p.x + w + self.kerf, 'y': r['y'], 'w': r['x'] + r['w'] - (p.x + w + self.kerf), 'h': r['h']})
-                if p.y > r['y']: new_free.append({'x': r['x'], 'y': r['y'], 'w': r['w'], 'h': p.y - r['y']})
-                if p.y + h + self.kerf < r['y'] + r['h']: new_free.append({'x': r['x'], 'y': p.y + h + self.kerf, 'w': r['w'], 'h': r['y'] + r['h'] - (p.y + h + self.kerf)})
+            if not (x >= r['x'] + r['w'] or x + w + self.kerf <= r['x'] or 
+                    y >= r['y'] + r['h'] or y + h + self.kerf <= r['y']):
+                if x > r['x']: new_free.append({'x': r['x'], 'y': r['y'], 'w': x - r['x'], 'h': r['h']})
+                if x + w + self.kerf < r['x'] + r['w']: new_free.append({'x': x + w + self.kerf, 'y': r['y'], 'w': r['x'] + r['w'] - (x + w + self.kerf), 'h': r['h']})
+                if y > r['y']: new_free.append({'x': r['x'], 'y': r['y'], 'w': r['w'], 'h': y - r['y']})
+                if y + h + self.kerf < r['y'] + r['h']: new_free.append({'x': r['x'], 'y': y + h + self.kerf, 'w': r['w'], 'h': r['y'] + r['h'] - (y + h + self.kerf)})
             else: new_free.append(r)
         sheet['free_rects'] = self._cleanup_rects(new_free)
 
@@ -97,28 +92,46 @@ class MaxRectsOptimizer:
             if keep: unique.append(r1)
         return unique
 
-def parse_excel_input(text, full_w):
-    panels = []
-    lines = text.strip().split('\n')
-    for line in lines:
-        parts = line.split('\t')
-        if len(parts) < 6: continue
-        try:
-            nimi = str(parts[0]).strip()
-            pituus = int(float(str(parts[1]).replace(',', '.')))
-            taysi_lkm = int(float(str(parts[3]).replace(',', '.')))
-            jatko_w = int(float(str(parts[4]).replace(',', '.')))
-            kpl = int(float(str(parts[5]).replace(',', '.')))
-            for _ in range(kpl * taysi_lkm): panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
-            if jatko_w > 0:
-                for _ in range(kpl): panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
-        except Exception: continue
-    return panels
+    def fill_waste_with_standards(self, library):
+        """Vaihe 2: Täytetään syntynyt hukka vakiotuotteilla."""
+        # Järjestetään kirjasto pinta-alan mukaan (suurimmat ensin)
+        sorted_lib = sorted(library, key=lambda x: x['Pit'] * x['Lev'], reverse=True)
+        
+        for sheet in self.sheets:
+            # Käydään vapaat alueet läpi toistuvasti kunnes mikään ei enää mahdu
+            added_any = True
+            while added_any:
+                added_any = False
+                for r_idx, rect in enumerate(sheet['free_rects']):
+                    for item in sorted_lib:
+                        for rot in [False, True]:
+                            w, h = (item['Lev'], item['Pit']) if rot else (item['Pit'], item['Lev'])
+                            if w <= rect['w'] and h <= rect['h']:
+                                # Luodaan vakiopaneeli
+                                p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
+                                p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
+                                sheet['panels'].append(p)
+                                # Poistetaan käytetty rect ja jaetaan tila
+                                sheet['free_rects'].pop(r_idx)
+                                self._split_rects(sheet, p.x, p.y, w, h)
+                                added_any = True
+                                break
+                        if added_any: break
+                    if added_any: break
+
+# --- APUFUNKTIOT JA KIRJASTO ---
+
+KIRJASTO_TIEDOSTO = "vakiokoot.json"
+
+def lataa_kirjasto():
+    if os.path.exists(KIRJASTO_TIEDOSTO):
+        with open(KIRJASTO_TIEDOSTO, "r") as f: return json.load(f)
+    return [{"Nimi": "Talla 200", "Pit": 200, "Lev": 200}]
 
 def group_layouts(sheets):
     unique = []
     for s in sheets:
-        fp_p = sorted([(p.w, p.h, p.x, p.y) for p in s['panels']])
+        fp_p = sorted([(p.w, p.h, p.x, p.y, p.is_standard) for p in s['panels']])
         fp_w = sorted([(r['w'], r['h'], r['x'], r['y']) for r in s['free_rects'] if r['w']*r['h'] > 100])
         fingerprint = (tuple(fp_p), tuple(fp_w))
         found = False
@@ -158,114 +171,86 @@ def create_pdf_bytes(layouts, s_w, s_h):
         pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
     return bytes(pdf.output())
 
-# --- NÄKYMÄ ---
+# --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.2")
+    st.subheader("📐 Levyoptimoija v4.3 (Auto-Fill)")
 
-    if 'opt_results' not in st.session_state:
-        st.session_state.opt_results = None
-
-    # Ladataan vakiokoot muistiin
-    if 'kirjasto' not in st.session_state:
-        st.session_state.kirjasto = lataa_kirjasto()
+    if 'opt_results' not in st.session_state: st.session_state.opt_results = None
+    if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
 
     with st.sidebar:
-        st.header("Levyn asetukset")
-        s_w = st.number_input("Varastolevyn Pituus (mm)", value=2440)
-        s_h = st.number_input("Varastolevyn Leveys (mm)", value=1220)
-        kerf = st.number_input("Sahanterä (mm)", value=4)
-        input_type = st.radio("Syöttötapa", ["Manuaalinen", "Excel-kopio"])
+        st.header("Asetukset")
+        s_w = st.number_input("Pituus (mm)", value=2440)
+        s_h = st.number_input("Leveys (mm)", value=1220)
+        kerf = st.number_input("Terä (mm)", value=4)
+        do_fill = st.checkbox("Täytä hukka vakiokooilla", value=True, help="Ohjelma yrittää sijoittaa vakiokokoja tyhjiin hukkakohtiin.")
+        input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
-        st.divider()
         with st.expander("📦 Hallitse vakiotuotteita"):
-            # Muokattava taulukko vakiotuotteille
             df_v = pd.DataFrame(st.session_state.kirjasto)
-            ed_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
-            if st.button("Päivitä kirjasto väliaikaisesti"):
-                st.session_state.kirjasto = ed_v.to_dict('records')
-            
-            # Mahdollisuus ladata JSON-tiedosto GitHubia varten
-            json_str = json.dumps(st.session_state.kirjasto, indent=4)
-            st.download_button(
-                label="Lataa vakiokoot.json",
-                data=json_str,
-                file_name="vakiokoot.json",
-                mime="application/json",
-                help="Lataa tämä tiedosto ja korvaa GitHubissa oleva vakiokoot.json, jos haluat tallentaa koot pysyvästi."
-            )
+            ed_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True)
+            if st.button("Päivitä kirjasto"): st.session_state.kirjasto = ed_v.to_dict('records')
 
-    # Kirjaston käyttö laskennassa
-    vakiopalat_laskentaan = []
-    with st.expander("➕ Lisää vakiotuotteita täytteeksi"):
-        st.write("Valitse kuinka monta kpl lisätään hukkakohdan täytteeksi:")
-        for i, item in enumerate(st.session_state.kirjasto):
-            c_v1, c_v2 = st.columns([3, 1])
-            with c_v1:
-                st.write(f"**{item['Nimi']}** ({item['Pit']}x{item['Lev']} mm)")
-            with c_v2:
-                v_kpl = st.number_input(f"Kpl", min_value=0, value=0, key=f"v_inp_{i}")
-                if v_kpl > 0:
-                    for _ in range(v_kpl):
-                        vakiopalat_laskentaan.append(Panel(item['Pit'], item['Lev'], f"{item['Nimi']} (Vakio)"))
-
-    # Syöttöosio
     palat = []
     if input_type == "Manuaalinen":
         df_init = pd.DataFrame([{"Nimi": "Osa 1", "Pit": 800, "Lev": 600, "Kpl": 5}])
         ed = st.data_editor(df_init, num_rows="dynamic", use_container_width=True)
         if st.button("Laske Optimointi", type="primary"):
             for _, r in ed.iterrows():
-                for _ in range(int(r["Kpl"])):
-                    palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
-            palat.extend(vakiopalat_laskentaan) # Lisätään vakiokoot
+                for _ in range(int(r["Kpl"])): palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
+            
             opt = MaxRectsOptimizer(s_w, s_h, kerf)
-            opt.optimize(palat)
+            opt.optimize(palat) # Vaihe 1
+            if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto) # Vaihe 2
             st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
             st.rerun()
     else:
-        raw_data = st.text_area("Liitä Excel-data (Nimi, Pit, Lev, Täysiä, Jatko, Kpl):")
+        raw_data = st.text_area("Liitä Excel-data:")
         if st.button("Optimoi Excel-data", type="primary"):
+            from levyopt import parse_excel_input
             palat = parse_excel_input(raw_data, s_h)
             if palat:
-                palat.extend(vakiopalat_laskentaan) # Lisätään vakiokoot
                 opt = MaxRectsOptimizer(s_w, s_h, kerf)
                 opt.optimize(palat)
+                if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto)
                 st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
                 st.rerun()
 
-    # Tulosten näyttäminen (sama kuin aiemmin)
     if st.session_state.opt_results:
         res = st.session_state.opt_results
         sw, sh = res['stock']
         layouts = group_layouts(res['sheets'])
         st.divider()
         
-        with st.spinner("Valmistellaan PDF-tiedostoa..."):
-            pdf_data = create_pdf_bytes(layouts, sw, sh)
-            st.download_button(label="📥 Lataa sahauslistat PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
+        pdf_data = create_pdf_bytes(layouts, sw, sh)
+        st.download_button(label="📥 Lataa PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
 
-        kaikki_hukkapalat = []
         for i, l in enumerate(layouts):
             with st.expander(f"Layout {chr(65+i)} — {l['count']} kpl", expanded=True):
-                col_info, col_viz = st.columns([1, 2.5])
-                with col_info:
-                    st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in l['panels']]), hide_index=True)
-                with col_viz:
+                c_vis1, c_vis2 = st.columns([1, 2.5])
+                with c_vis1:
+                    # Erotellaan tilausosat ja vakiopalat listassa
+                    osat = [p for p in l['panels'] if not p.is_standard]
+                    st.write("**Tilausosat:**")
+                    st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in osat]), hide_index=True)
+                    
+                    vakiot = [p for p in l['panels'] if p.is_standard]
+                    if vakiot:
+                        st.write("**Varastoon sahattavat (Vakio):**")
+                        # Lasketaan määrät
+                        v_df = pd.DataFrame([{"Osa": p.label, "W": p.w, "H": p.h} for p in vakiot])
+                        v_koonti = v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl")
+                        st.dataframe(v_koonti, hide_index=True)
+
+                with c_vis2:
                     fig, ax = plt.subplots(figsize=(7, 2.8))
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
-                        ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=p.text_color)
+                        if p.w > 120:
+                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color=p.text_color)
                     for r in l['waste']:
-                        kaikki_hukkapalat.append({'L': r['w'], 'K': r['h'], 'lkm': l['count']})
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
                     ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off')
                     st.pyplot(fig); plt.close()
-        
-        if kaikki_hukkapalat:
-            st.divider()
-            st.subheader("📦 Jämäpalat (m²)")
-            h_df = pd.DataFrame(kaikki_hukkapalat).groupby(['L', 'K']).sum().reset_index()
-            h_df['m²'] = (h_df['L'] * h_df['K'] / 1e6)
-            st.dataframe(h_df.sort_values('m²', ascending=False).style.format({'m²': '{:.3f}'}), hide_index=True)
