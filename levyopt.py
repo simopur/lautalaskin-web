@@ -6,17 +6,14 @@ import hashlib
 import io
 from fpdf import FPDF
 
-# --- APUFUNKTIOT KONTRASTILLE ---
+# --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
     """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    # Luminanssi-kaava
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
     return "white" if luminance < 0.5 else "black"
-
-# --- PERUSLUOKAT ---
 
 class Panel:
     def __init__(self, w, h, label=""):
@@ -116,59 +113,45 @@ def group_layouts(sheets):
             unique.append({'panels': s['panels'], 'waste': s['free_rects'], 'fp': fingerprint, 'count': 1})
     return unique
 
-# --- PDF LUONTI 8 PER SIVU ---
-
 def create_pdf_bytes(layouts, s_w, s_h):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=10)
-    
-    # 2 saraketta, 4 riviä = 8 layoutia per sivu
     w_mm, h_mm = 90, 45 
-    
     for i, l in enumerate(layouts):
         if i % 8 == 0:
             pdf.add_page()
             pdf.set_font("helvetica", "B", 14)
             pdf.cell(0, 8, f"Sahauslistat - Sivu {int(i/8)+1}", ln=True, align="C")
-        
         fig, ax = plt.subplots(figsize=(7, 3))
         ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
         for p in l['panels']:
             ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
             if p.w > 120:
-                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', 
-                        fontsize=6, fontweight='bold', color=p.text_color)
-        
+                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=p.text_color)
         for r in l['waste']:
             ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
-            
         ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
-        
         img_buf = io.BytesIO()
         plt.savefig(img_buf, format='png', dpi=180, bbox_inches='tight')
         plt.close(fig)
-        
-        # 2x4 Ruudukko-laskenta
-        row = (i % 8) // 2
-        col = (i % 8) % 2
-        x_p, y_p = 10 + (col * 100), 20 + (row * 65) # Marginaalit ja välit
-        
+        row, col = (i % 8) // 2, (i % 8) % 2
+        x_p, y_p = 10 + (col * 100), 20 + (row * 65)
         pdf.set_xy(x_p, y_p - 6)
         pdf.set_font("helvetica", "B", 10)
         pdf.cell(w_mm, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False)
         pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
-        
     return bytes(pdf.output())
 
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v3.9")
+    st.subheader("📐 Levyoptimoija v4.0")
 
     if 'opt_results' not in st.session_state:
         st.session_state.opt_results = None
 
     with st.sidebar:
+        st.header("Levyn asetukset")
         s_w = st.number_input("Varastolevyn Pituus (mm)", value=2440)
         s_h = st.number_input("Varastolevyn Leveys (mm)", value=1220)
         kerf = st.number_input("Sahanterä (mm)", value=4)
@@ -187,10 +170,10 @@ def nayta_levyoptimoija():
             st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
             st.rerun()
     else:
-        f_w = st.number_input("Levyn suikaleen leveys (mm)", value=1220)
-        raw_data = st.text_area("Liitä Excel-data:")
+        st.info(f"Excel-syötössä käytetään automaattisesti varastolevyn leveyttä ({s_h} mm).")
+        raw_data = st.text_area("Liitä Excel-data (Nimi, Pit, Lev, Täysiä, Jatko, Kpl):")
         if st.button("Optimoi Excel-data", type="primary"):
-            palat = parse_excel_input(raw_data, f_w)
+            palat = parse_excel_input(raw_data, s_h) # S_h korvaa aiemman f_w:n
             if palat:
                 opt = MaxRectsOptimizer(s_w, s_h, kerf)
                 opt.optimize(palat)
@@ -210,7 +193,7 @@ def nayta_levyoptimoija():
         total_s = (len(res['sheets']) * sw * sh) / 1e6
         m2.metric("Hyötykäyttö", f"{(total_u/total_s*100):.1f} %", f"{(total_s-total_u):.3f} m² hukkaa", delta_color="inverse")
 
-        with st.spinner("Valmistellaan PDF-tiedostoa (8 layoutia/sivu)..."):
+        with st.spinner("Valmistellaan PDF-tiedostoa..."):
             pdf_data = create_pdf_bytes(layouts, sw, sh)
             st.download_button(label="📥 Lataa sahauslistat PDF", data=pdf_data, file_name="sahauslistat.pdf", mime="application/pdf")
 
