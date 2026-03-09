@@ -6,7 +6,7 @@ import hashlib
 import io
 from fpdf import FPDF
 
-# --- LOGIIKKA JA LUOKAT ---
+# --- PERUSLUOKAT ---
 
 class Panel:
     def __init__(self, w, h, label=""):
@@ -73,6 +73,8 @@ class MaxRectsOptimizer:
             if keep: unique.append(r1)
         return unique
 
+# --- APUFUNKTIOT ---
+
 def parse_excel_input(text, full_w):
     panels = []
     lines = text.strip().split('\n')
@@ -80,11 +82,20 @@ def parse_excel_input(text, full_w):
         parts = line.split('\t')
         if len(parts) < 6: continue
         try:
-            nimi, pituus, taysi_lkm, jatko_w, kpl = parts[0], int(float(parts[1].replace(',', '.'))), int(parts[3]), int(parts[4]), int(parts[5])
-            for _ in range(kpl * taysi_lkm): panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
+            # Puhdistetaan nimet ja numerot
+            nimi = str(parts[0]).strip()
+            pituus = int(float(str(parts[1]).replace(',', '.')))
+            taysi_lkm = int(float(str(parts[3]).replace(',', '.')))
+            jatko_w = int(float(str(parts[4]).replace(',', '.')))
+            kpl = int(float(str(parts[5]).replace(',', '.')))
+            
+            for _ in range(kpl * taysi_lkm):
+                panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
             if jatko_w > 0:
-                for _ in range(kpl): panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
-        except: continue
+                for _ in range(kpl):
+                    panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
+        except Exception:
+            continue
     return panels
 
 def group_layouts(sheets):
@@ -101,105 +112,133 @@ def group_layouts(sheets):
             unique.append({'panels': s['panels'], 'waste': s['free_rects'], 'fp': fingerprint, 'count': 1})
     return unique
 
-def create_pdf(layouts, s_w, s_h):
+def create_pdf_bytes(layouts, s_w, s_h):
+    """Luo PDF-tiedoston ja palauttaa sen tavuina (bytes)."""
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
-    w_mm, h_mm = 90, 40 
+    
+    w_mm, h_mm = 90, 45 # Yhden kaavion koko PDF:ssä
+    
     for i, l in enumerate(layouts):
         if i % 4 == 0:
             pdf.add_page()
             pdf.set_font("helvetica", "B", 16)
             pdf.cell(0, 10, f"Sahauslistat - Sivu {int(i/4)+1}", ln=True, align="C")
+            pdf.ln(5)
+        
+        # Luodaan kuva muistiin
         fig, ax = plt.subplots(figsize=(7, 3))
         ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1))
         for p in l['panels']:
             ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
-            if p.w > 120: ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color='white')
+            if p.w > 120:
+                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color='white')
+        
         for r in l['waste']:
             ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.3, lw=0.3))
+            
         ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
+        
         img_buf = io.BytesIO()
-        plt.savefig(img_buf, format='png', dpi=200, bbox_inches='tight')
+        plt.savefig(img_buf, format='png', dpi=180, bbox_inches='tight')
         plt.close(fig)
+        
+        # Sijoittelu 2x2 ruudukkoon
         row, col = (i % 4) // 2, (i % 4) % 2
-        x_p, y_p = 10 + (col * 100), 30 + (row * 120)
+        x_p, y_p = 10 + (col * 100), 30 + (row * 125)
+        
         pdf.set_xy(x_p, y_p - 8)
         pdf.set_font("helvetica", "B", 11)
         pdf.cell(w_mm, 8, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False)
         pdf.image(img_buf, x=x_p, y=y_p, w=w_mm)
-    return pdf.output()
+        
+    # Palautetaan tavuina Streamlitiä varten
+    return bytes(pdf.output())
 
-# --- KÄYTTÖLIITTYMÄ ---
+# --- PÄÄNÄKYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v3.7")
+    st.subheader("📐 Levyoptimoija v3.8")
 
-    if 'last_results' not in st.session_state:
-        st.session_state.last_results = None
+    # Alustetaan session_state tallennusta varten
+    if 'opt_results' not in st.session_state:
+        st.session_state.opt_results = None
 
     with st.sidebar:
-        s_w = st.number_input("Levyn Pituus (mm)", value=2440)
-        s_h = st.number_input("Levyn Leveys (mm)", value=1220)
-        kerf = st.number_input("Terä (mm)", value=4)
-        input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
+        s_w = st.number_input("Varastolevyn Pituus (mm)", value=2440)
+        s_h = st.number_input("Varastolevyn Leveys (mm)", value=1220)
+        kerf = st.number_input("Sahanterä (mm)", value=4)
+        input_type = st.radio("Syöttötapa", ["Manuaalinen", "Excel-kopio"])
 
-    palat = []
+    # Syöttöosio
     if input_type == "Manuaalinen":
         df_init = pd.DataFrame([{"Nimi": "Osa 1", "Pit": 800, "Lev": 600, "Kpl": 5}])
         ed = st.data_editor(df_init, num_rows="dynamic", use_container_width=True)
         if st.button("Laske Optimointi", type="primary"):
+            palat = []
             for _, r in ed.iterrows():
                 for _ in range(int(r["Kpl"])):
                     palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
-            # Suoritetaan optimointi ja tallennetaan tilaan
+            
             opt = MaxRectsOptimizer(s_w, s_h, kerf)
             opt.optimize(palat)
-            st.session_state.last_results = {'sheets': opt.sheets, 'stock': (s_w, s_h), 'palat_count': len(palat)}
+            st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
+            st.rerun()
 
     else:
-        full_w = st.number_input("Levyn leveys (mm)", value=1220)
-        raw = st.text_area("Liitä Excel-data:")
-        if raw and st.button("Optimoi Excel-data", type="primary"):
-            palat = parse_excel_input(raw, full_w)
-            opt = MaxRectsOptimizer(s_w, s_h, kerf)
-            opt.optimize(palat)
-            st.session_state.last_results = {'sheets': opt.sheets, 'stock': (s_w, s_h), 'palat_count': len(palat)}
+        f_w = st.number_input("Levyn suikaleen leveys (mm)", value=1220)
+        raw_data = st.text_area("Liitä Excel-data:")
+        if st.button("Optimoi Excel-data", type="primary"):
+            palat = parse_excel_input(raw_data, f_w)
+            if palat:
+                opt = MaxRectsOptimizer(s_w, s_h, kerf)
+                opt.optimize(palat)
+                st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
+                st.rerun()
+            else:
+                st.error("Dataa ei voitu lukea. Tarkista kopiointi.")
 
-    # NÄYTETÄÄN TULOKSET JOS NE ON TALLENNETTU
-    if st.session_state.last_results:
-        res = st.session_state.last_results
+    # TULOSTEN NÄYTTÄMINEN
+    if st.session_state.opt_results:
+        res = st.session_state.opt_results
         sw, sh = res['stock']
         layouts = group_layouts(res['sheets'])
         
         st.divider()
-        c1, c2 = st.columns(2)
-        c1.metric("Levyjä yhteensä", f"{len(res['sheets'])} kpl")
         
-        # PDF-generointi täällä, jotta se ei tyhjennä muuta
-        pdf_bytes = create_pdf(layouts, sw, sh)
-        st.download_button("📥 Lataa PDF (A4 2x2)", data=pdf_bytes, file_name="sahauslistat.pdf", mime="application/pdf")
+        # PDF-latauspainike (nyt varmistettu tavuina)
+        with st.spinner("Valmistellaan PDF-tiedostoa..."):
+            pdf_data = create_pdf_bytes(layouts, sw, sh)
+            st.download_button(
+                label="📥 Lataa sahauslistat PDF (A4 2x2)",
+                data=pdf_data,
+                file_name="sahauslistat.pdf",
+                mime="application/pdf"
+            )
 
+        # Näytetään layoutit ruudulla
         kaikki_hukkapalat = []
         for i, l in enumerate(layouts):
             with st.expander(f"Layout {chr(65+i)} — {l['count']} kpl", expanded=True):
-                c_vis1, c_vis2 = st.columns([1, 2.5])
-                with c_vis1:
+                col_info, col_viz = st.columns([1, 2.5])
+                with col_info:
                     st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in l['panels']]), hide_index=True)
-                with c_vis2:
+                with col_viz:
                     fig, ax = plt.subplots(figsize=(7, 2.8))
                     ax.add_patch(patches.Rectangle((0, 0), sw, sh, facecolor='none', edgecolor='black', lw=1))
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
-                        if p.w > 120: ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color='white')
+                        if p.w > 120:
+                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color='white')
                     for r in l['waste']:
                         kaikki_hukkapalat.append({'L': r['w'], 'K': r['h'], 'lkm': l['count']})
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.3, lw=0.3))
-                        if r['w'] > 120 and r['h'] > 120:
-                            ax.text(r['x']+r['w']/2, r['y']+r['h']/2, f"{int(r['w'])}x{int(r['h'])}", ha='center', va='center', fontsize=4, color='#c0392b', alpha=0.8)
                     ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off')
                     st.pyplot(fig); plt.close()
 
+        # Jämäpalojen koonti
         if kaikki_hukkapalat:
+            st.divider()
             st.subheader("📦 Jämäpalat (m²)")
             h_df = pd.DataFrame(kaikki_hukkapalat).groupby(['L', 'K']).sum().reset_index()
             h_df['m²'] = (h_df['L'] * h_df['K'] / 1e6)
