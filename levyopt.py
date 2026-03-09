@@ -20,21 +20,19 @@ def piirra_paneelin_teksti(ax, p, base_fs=6):
     """Laskee tekstin koon ja asennon niin, että se mahtuu palan sisään."""
     teksti = f"{int(p.w)}x{int(p.h)}"
     
-    # Tarkistetaan asento: jos pala on kapea ja korkea, teksti pystyyn
+    # Tarkistetaan asento
     pystyyn = p.h > p.w * 1.2
     pituus = p.h if pystyyn else p.w
     leveys = p.w if pystyyn else p.h
     
-    # Dynaaminen fonttikoko (fs):
-    # Lasketaan fs siten, että tekstin pituus (n. 7-8 merkkiä) mahtuu palan pituuteen.
-    # 2440mm levyllä 7 tuuman kuvassa 1 piste on n. 5-7 yksikköä.
-    fs_leveys_raja = pituus / (len(teksti) * 0.75) / 6.5
-    fs_korkeus_raja = leveys / 22
+    # Dynaaminen fonttikoko (fs)
+    # Lasketaan fs siten, että teksti mahtuu palan pituuteen ja leveyteen
+    fs_leveys_raja = pituus / (len(teksti) * 0.7) / 6.0
+    fs_korkeus_raja = leveys / 20
     
     fs = min(base_fs, fs_leveys_raja, fs_korkeus_raja)
-    fs = max(fs, 2.0) # Alaraja, ettei teksti katoa täysin
+    fs = max(fs, 2.0) 
     
-    # Piirretään teksti vain jos pala on fyysisesti tarpeeksi suuri
     if p.w > 45 and p.h > 45:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
                 ha='center', va='center', fontsize=fs,
@@ -96,7 +94,8 @@ class MaxRectsOptimizer:
                 if x + w + self.kerf < r['x'] + r['w']: new_free.append({'x': x + w + self.kerf, 'y': r['y'], 'w': r['x'] + r['w'] - (x + w + self.kerf), 'h': r['h']})
                 if y > r['y']: new_free.append({'x': r['x'], 'y': r['y'], 'w': r['w'], 'h': y - r['y']})
                 if y + h + self.kerf < r['y'] + r['h']: new_free.append({'x': r['x'], 'y': y + h + self.kerf, 'w': r['w'], 'h': r['y'] + r['h'] - (y + h + self.kerf)})
-            else: new_free.append(r)
+            else:
+                new_free.append(r)
         sheet['free_rects'] = self._cleanup_rects(new_free)
 
     def _cleanup_rects(self, rects):
@@ -110,27 +109,40 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
+        """Uusittu logiikka: Priorisoi suurimmat vakiokoot ensin."""
         active_lib = [item for item in library if item.get('Käytä', True)]
         if not active_lib: return
+        # Järjestetään kirjasto pinta-alan mukaan laskevasti
         sorted_lib = sorted(active_lib, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
+        
         for sheet in self.sheets:
-            while True:
-                best_v_placement = None 
-                for rect in sheet['free_rects']:
-                    for item in sorted_lib:
+            placed_on_sheet = True
+            while placed_on_sheet:
+                placed_on_sheet = False
+                # Käydään läpi kirjasto suurimmasta alkaen
+                for item in sorted_lib:
+                    best_for_this_item = None
+                    w_orig, h_orig = int(item['Pit']), int(item['Lev'])
+                    
+                    # Etsitään paras paikka tälle nimenomaiselle koolle
+                    for rect in sheet['free_rects']:
                         for rot in [False, True]:
-                            w, h = (int(item['Lev']), int(item['Pit'])) if rot else (int(item['Pit']), int(item['Lev']))
+                            w, h = (h_orig, w_orig) if rot else (w_orig, h_orig)
                             if w <= rect['w'] and h <= rect['h']:
-                                score = rect['y'] + h
-                                if best_v_placement is None or score < best_v_placement[5]:
-                                    best_v_placement = (rect, item, w, h, rot, score)
-                if best_v_placement:
-                    rect, item, w, h, rot, _ = best_v_placement
-                    p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
-                    p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
-                    sheet['panels'].append(p)
-                    self._split_rects(sheet, p.x, p.y, w, h)
-                else: break
+                                # Score: mahdollisimman alas (y) ja vasemmalle (x)
+                                score = rect['y'] * 10 + rect['x']
+                                if best_for_this_item is None or score < best_for_this_item[4]:
+                                    best_for_this_item = (rect, w, h, rot, score)
+                    
+                    if best_for_this_item:
+                        rect, w, h, rot, _ = best_for_this_item
+                        p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
+                        p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
+                        sheet['panels'].append(p)
+                        self._split_rects(sheet, p.x, p.y, w, h)
+                        placed_on_sheet = True
+                        break # Aloitetaan uusi kierros suurimmasta itemistä
+                    # Jos tälle itemille ei löytynyt tilaa, kokeillaan seuraavaksi suurinta itemiä
 
 # --- KIRJASTO, PDF JA PARSE ---
 
@@ -199,7 +211,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v5.1")
+    st.subheader("📐 Levyoptimoija v5.2")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
