@@ -98,7 +98,10 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
-        sorted_lib = sorted(library, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
+        # Suodatetaan vain ne, joissa 'Käytä' on True
+        active_lib = [item for item in library if item.get('Käytä', True)]
+        sorted_lib = sorted(active_lib, key=lambda x: int(x['Pit']) * int(x['Lev']), reverse=True)
+        
         for sheet in self.sheets:
             added_any = True
             while added_any:
@@ -122,9 +125,14 @@ KIRJASTO_TIEDOSTO = "vakiokoot.json"
 def lataa_kirjasto():
     if os.path.exists(KIRJASTO_TIEDOSTO):
         try:
-            with open(KIRJASTO_TIEDOSTO, "r") as f: return json.load(f)
+            with open(KIRJASTO_TIEDOSTO, "r") as f:
+                data = json.load(f)
+                # Varmistetaan että kaikilla on 'Käytä' kenttä
+                for item in data:
+                    if 'Käytä' not in item: item['Käytä'] = True
+                return data
         except: pass
-    return [{"Nimi": "Talla 200", "Pit": 200, "Lev": 200}]
+    return [{"Nimi": "Talla 200", "Pit": 200, "Lev": 200, "Käytä": True}]
 
 def group_layouts(sheets):
     unique = []
@@ -178,7 +186,7 @@ def parse_excel_input(text, full_w):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.8")
+    st.subheader("📐 Levyoptimoija v4.9")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -197,10 +205,15 @@ def nayta_levyoptimoija():
             st.rerun()
 
         with st.expander("📦 Hallitse vakiotuotteita"):
+            # Luodaan taulukko, jossa 'Käytä' on mukana
             df_v = pd.DataFrame(st.session_state.kirjasto)
             if not df_v.empty:
                 df_v["Pit"] = df_v["Pit"].astype(int)
                 df_v["Lev"] = df_v["Lev"].astype(int)
+                # Järjestetään sarakkeet loogisesti: Käytä ekaksi
+                cols = ['Käytä', 'Nimi', 'Pit', 'Lev']
+                df_v = df_v[[c for c in cols if c in df_v.columns] + [c for c in df_v.columns if c not in cols]]
+            
             edited_v = st.data_editor(df_v, num_rows="dynamic", use_container_width=True, key="kirjasto_editor")
             
             if not edited_v.equals(df_v):
@@ -235,7 +248,7 @@ def nayta_levyoptimoija():
         sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
         st.divider()
         
-        # --- METRIIKAT (Hukkaprosentti mukana) ---
+        # --- METRIIKAT ---
         total_used_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if not getattr(p, 'is_standard', False)) / 1e6
         total_standard_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if getattr(p, 'is_standard', False)) / 1e6
         total_stock_area = (len(res['sheets']) * sw * sh) / 1e6
