@@ -181,20 +181,20 @@ st.title("🏗️ Pakkausvalmistuksen Jakolaskin v4.7")
 if st.button("🗑️ Tyhjennä kaikki kentät", on_click=tyhjenna_kaikki):
     st.rerun()
 
-t1, t2 = st.tabs(["📊 Lattiapohja", "🪵 Jalakset"])
+t1, t2 = st.tabs(["📊 Lautajako", "🪵 Jalakset"])
 
 with t1:
-    st.header("Lattiapohjan jako")
+    st.header("Lautajako")
     c1, c2 = st.columns(2)
     with c1:
-        f_max = st.number_input("Laudan pituus mm", key="f_max_l")
-        f_ulp = st.number_input("ulkopituus mm", key="f_ulp")
-        f_tne = st.number_input("tn etäisyys mm", key="f_tne")
+        f_max = st.number_input("Laudan pituus (mm)", key="f_max_l")
+        f_ulp = st.number_input("Ulkopituus (mm)", key="f_ulp")
+        f_tne = st.number_input("TN etäisyys (mm)", key="f_tne")
     with c2:
-        f_tnv = st.number_input("tn väli mm", key="f_tnv")
-        f_tnm = st.number_input("tn määrä kpl", key="f_tnm")
+        f_tnv = st.number_input("TN väli (mm)", key="f_tnv")
+        f_tnm = st.number_input("TN määrä (kpl)", key="f_tnm")
 
-    if st.button("Laske lattiapohja", type="primary"):
+    if st.button("Laske lautajako", type="primary"):
         nostot = [int(f_tne + (i * f_tnv)) for i in range(int(f_tnm)) if (int(f_tne + (i * f_tnv))) < f_ulp]
         all_p = [0] + nostot + [int(f_ulp)]
         sallitut = list(range(2, len(all_p) - 2))
@@ -238,3 +238,4 @@ with t2:
             piirra_jalasjako(d, j_p, v)
             for i, kerros in enumerate(d):
                 st.info(f"**Kerros {i+1}:** {' + '.join(map(str, kerros))} mm")
+
