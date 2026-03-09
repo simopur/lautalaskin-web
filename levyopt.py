@@ -11,6 +11,7 @@ from fpdf import FPDF
 # --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
+    """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -23,9 +24,8 @@ class Panel:
         self.x, self.y = 0, 0
         self.is_rotated = False
         self.is_standard = is_standard
-        # Vakiokoot ovat aina harmaita, tilausosat dynaamisia
         if is_standard:
-            self.color = "#95a5a6" # Neutraali harmaa
+            self.color = "#95a5a6" 
         else:
             dims = sorted([w, h])
             tag = f"{dims[0]}x{dims[1]}"
@@ -40,7 +40,6 @@ class MaxRectsOptimizer:
         self.sheets = []
 
     def optimize(self, panels):
-        # Vaihe 1: Optimoidaan varsinaiset tilausosat
         sorted_panels = sorted(panels, key=lambda p: p.w * p.h, reverse=True)
         for p in sorted_panels:
             self._place_pala_best_fit(p)
@@ -93,12 +92,8 @@ class MaxRectsOptimizer:
         return unique
 
     def fill_waste_with_standards(self, library):
-        """Vaihe 2: Täytetään syntynyt hukka vakiotuotteilla."""
-        # Järjestetään kirjasto pinta-alan mukaan (suurimmat ensin)
         sorted_lib = sorted(library, key=lambda x: x['Pit'] * x['Lev'], reverse=True)
-        
         for sheet in self.sheets:
-            # Käydään vapaat alueet läpi toistuvasti kunnes mikään ei enää mahdu
             added_any = True
             while added_any:
                 added_any = False
@@ -107,11 +102,9 @@ class MaxRectsOptimizer:
                         for rot in [False, True]:
                             w, h = (item['Lev'], item['Pit']) if rot else (item['Pit'], item['Lev'])
                             if w <= rect['w'] and h <= rect['h']:
-                                # Luodaan vakiopaneeli
                                 p = Panel(w, h, f"{item['Nimi']} (Vakio)", is_standard=True)
                                 p.x, p.y, p.is_rotated = rect['x'], rect['y'], rot
                                 sheet['panels'].append(p)
-                                # Poistetaan käytetty rect ja jaetaan tila
                                 sheet['free_rects'].pop(r_idx)
                                 self._split_rects(sheet, p.x, p.y, w, h)
                                 added_any = True
@@ -131,7 +124,8 @@ def lataa_kirjasto():
 def group_layouts(sheets):
     unique = []
     for s in sheets:
-        fp_p = sorted([(p.w, p.h, p.x, p.y, p.is_standard) for p in s['panels']])
+        # Käytetään getattria, jotta vanhat oliot muistissa eivät kaada sovellusta
+        fp_p = sorted([(p.w, p.h, p.x, p.y, getattr(p, 'is_standard', False)) for p in s['panels']])
         fp_w = sorted([(r['w'], r['h'], r['x'], r['y']) for r in s['free_rects'] if r['w']*r['h'] > 100])
         fingerprint = (tuple(fp_p), tuple(fp_w))
         found = False
@@ -141,6 +135,24 @@ def group_layouts(sheets):
         if not found:
             unique.append({'panels': s['panels'], 'waste': s['free_rects'], 'fp': fingerprint, 'count': 1})
     return unique
+
+def parse_excel_input(text, full_w):
+    panels = []
+    lines = text.strip().split('\n')
+    for line in lines:
+        parts = line.split('\t')
+        if len(parts) < 6: continue
+        try:
+            nimi = str(parts[0]).strip()
+            pituus = int(float(str(parts[1]).replace(',', '.')))
+            taysi_lkm = int(float(str(parts[3]).replace(',', '.')))
+            jatko_w = int(float(str(parts[4]).replace(',', '.')))
+            kpl = int(float(str(parts[5]).replace(',', '.')))
+            for _ in range(kpl * taysi_lkm): panels.append(Panel(pituus, full_w, f"{nimi} (T)"))
+            if jatko_w > 0:
+                for _ in range(kpl): panels.append(Panel(pituus, jatko_w, f"{nimi} (J)"))
+        except Exception: continue
+    return panels
 
 def create_pdf_bytes(layouts, s_w, s_h):
     pdf = FPDF()
@@ -156,7 +168,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
         for p in l['panels']:
             ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
             if p.w > 120:
-                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=p.text_color)
+                ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=6, fontweight='bold', color=getattr(p, 'text_color', 'black'))
         for r in l['waste']:
             ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
         ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
@@ -174,7 +186,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v4.3 (Auto-Fill)")
+    st.subheader("📐 Levyoptimoija v4.3.1 (Auto-Fill & Fix)")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_kirjasto()
@@ -184,7 +196,7 @@ def nayta_levyoptimoija():
         s_w = st.number_input("Pituus (mm)", value=2440)
         s_h = st.number_input("Leveys (mm)", value=1220)
         kerf = st.number_input("Terä (mm)", value=4)
-        do_fill = st.checkbox("Täytä hukka vakiokooilla", value=True, help="Ohjelma yrittää sijoittaa vakiokokoja tyhjiin hukkakohtiin.")
+        do_fill = st.checkbox("Täytä hukka vakiokooilla", value=True)
         input_type = st.radio("Syöttö", ["Manuaalinen", "Excel-kopio"])
         
         with st.expander("📦 Hallitse vakiotuotteita"):
@@ -201,14 +213,13 @@ def nayta_levyoptimoija():
                 for _ in range(int(r["Kpl"])): palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
             
             opt = MaxRectsOptimizer(s_w, s_h, kerf)
-            opt.optimize(palat) # Vaihe 1
-            if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto) # Vaihe 2
+            opt.optimize(palat)
+            if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto)
             st.session_state.opt_results = {'sheets': opt.sheets, 'stock': (s_w, s_h)}
             st.rerun()
     else:
         raw_data = st.text_area("Liitä Excel-data:")
         if st.button("Optimoi Excel-data", type="primary"):
-            from levyopt import parse_excel_input
             palat = parse_excel_input(raw_data, s_h)
             if palat:
                 opt = MaxRectsOptimizer(s_w, s_h, kerf)
@@ -230,15 +241,13 @@ def nayta_levyoptimoija():
             with st.expander(f"Layout {chr(65+i)} — {l['count']} kpl", expanded=True):
                 c_vis1, c_vis2 = st.columns([1, 2.5])
                 with c_vis1:
-                    # Erotellaan tilausosat ja vakiopalat listassa
-                    osat = [p for p in l['panels'] if not p.is_standard]
+                    osat = [p for p in l['panels'] if not getattr(p, 'is_standard', False)]
                     st.write("**Tilausosat:**")
                     st.dataframe(pd.DataFrame([{"Osa": p.label, "Koko": f"{p.w}x{p.h}"} for p in osat]), hide_index=True)
                     
-                    vakiot = [p for p in l['panels'] if p.is_standard]
+                    vakiot = [p for p in l['panels'] if getattr(p, 'is_standard', False)]
                     if vakiot:
-                        st.write("**Varastoon sahattavat (Vakio):**")
-                        # Lasketaan määrät
+                        st.write("**Varastoon (Vakio):**")
                         v_df = pd.DataFrame([{"Osa": p.label, "W": p.w, "H": p.h} for p in vakiot])
                         v_koonti = v_df.groupby(["Osa", "W", "H"]).size().reset_index(name="Kpl")
                         st.dataframe(v_koonti, hide_index=True)
@@ -249,7 +258,7 @@ def nayta_levyoptimoija():
                     for p in l['panels']:
                         ax.add_patch(patches.Rectangle((p.x, p.y), p.w, p.h, facecolor=p.color, edgecolor='black', alpha=0.9, lw=0.4))
                         if p.w > 120:
-                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color=p.text_color)
+                            ax.text(p.x+p.w/2, p.y+p.h/2, f"{p.w}x{p.h}", ha='center', va='center', fontsize=5, fontweight='bold', color=getattr(p, 'text_color', 'black'))
                     for r in l['waste']:
                         ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
                     ax.set_xlim(0, sw); ax.set_ylim(0, sh); ax.set_aspect('equal'); ax.axis('off')
