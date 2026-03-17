@@ -12,6 +12,7 @@ from fpdf import FPDF
 # --- APUFUNKTIOT ---
 
 def get_contrast_color(hex_color):
+    """Laskee kumpiko teksti (musta/valkoinen) erottuu paremmin taustasta."""
     hex_color = hex_color.lstrip('#')
     r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -24,11 +25,10 @@ def piirra_paneelin_teksti(ax, p, base_fs=6):
     pituus = p.h if pystyyn else p.w
     leveys = p.w if pystyyn else p.h
     
-    # Dynaaminen fonttikoko palan mittojen mukaan
     fs_leveys_raja = pituus / (len(teksti) * 0.7) / 6.0
     fs_korkeus_raja = leveys / 20
     fs = min(base_fs, fs_leveys_raja, fs_korkeus_raja)
-    fs = max(fs, 2.0) # Varmistetaan luettavuus
+    fs = max(fs, 2.0) 
     
     if p.w > 45 and p.h > 45:
         ax.text(p.x + p.w/2, p.y + p.h/2, teksti,
@@ -160,8 +160,6 @@ def create_pdf_bytes(layouts, s_w, s_h):
     for i, l in enumerate(layouts):
         if i % 8 == 0:
             pdf.add_page(); pdf.set_font("helvetica", "B", 14); pdf.cell(0, 8, f"Sahauslistat - Sivu {int(i/8)+1}", ln=True, align="C")
-        
-        # Käytetään Figure-oliota (Thread-safe Streamlitissä)
         fig = Figure(figsize=(7, 3))
         ax = fig.add_subplot(111)
         ax.add_patch(patches.Rectangle((0, 0), s_w, s_h, facecolor='none', edgecolor='black', lw=1.2))
@@ -171,9 +169,7 @@ def create_pdf_bytes(layouts, s_w, s_h):
         for r in l['waste']:
             ax.add_patch(patches.Rectangle((r['x'], r['y']), r['w'], r['h'], facecolor='none', edgecolor='#e74c3c', hatch='///', alpha=0.2, lw=0.3))
         ax.set_xlim(0, s_w); ax.set_ylim(0, s_h); ax.set_aspect('equal'); ax.axis('off')
-        
-        img_buf = io.BytesIO()
-        fig.savefig(img_buf, format='png', dpi=180, bbox_inches='tight')
+        img_buf = io.BytesIO(); fig.savefig(img_buf, format='png', dpi=180, bbox_inches='tight')
         row, col = (i % 8) // 2, (i % 8) % 2
         x_p, y_p = 10 + (col * 100), 20 + (row * 65)
         pdf.set_xy(x_p, y_p - 6); pdf.set_font("helvetica", "B", 10); pdf.cell(90, 6, f"Layout {chr(65+i)} - {l['count']} kpl", ln=False); pdf.image(img_buf, x=x_p, y=y_p, w=90)
@@ -197,11 +193,11 @@ def parse_excel_input(text, full_w):
 # --- KÄYTTÖLIITTYMÄ ---
 
 def nayta_levyoptimoija():
-    st.subheader("📐 Levyoptimoija v6.2")
+    st.subheader("📐 Levyoptimoija v6.3")
 
     if 'opt_results' not in st.session_state: st.session_state.opt_results = None
     if 'kirjasto' not in st.session_state: st.session_state.kirjasto = lataa_json(KIRJASTO_TIEDOSTO, [{"Käytä": True, "Nimi": "Talla 200", "Pit": 200, "Lev": 200}])
-    if 'laatikot' not in st.session_state: st.session_state.laatikot = lataa_json(LAATIKKO_TIEDOSTO, [{"Nimi": "Vakiolaatikko 1", "Osat": "2kpl 400x400, 2kpl 600x400, 1kpl 600x400"}])
+    if 'laatikot' not in st.session_state: st.session_state.laatikot = lataa_json(LAATIKKO_TIEDOSTO, [{"Nimi": "Esimerkki", "Osat": "2kpl 400x400, 2kpl 600x400, 1kpl 600x400"}])
 
     with st.sidebar:
         st.header("Asetukset")
@@ -258,7 +254,6 @@ def nayta_levyoptimoija():
             for _, r in ed_m.iterrows():
                 if int(r.get("Kpl", 0)) > 0:
                     for _ in range(int(r["Kpl"])): palat.append(Panel(int(r["Pit"]), int(r["Lev"]), r["Nimi"]))
-            
             if palat:
                 opt = MaxRectsOptimizer(s_w, s_h, kerf); opt.optimize(palat)
                 if do_fill: opt.fill_waste_with_standards(st.session_state.kirjasto)
@@ -275,7 +270,30 @@ def nayta_levyoptimoija():
     if st.session_state.opt_results:
         res = st.session_state.opt_results
         sw, sh = res['stock']; layouts = group_layouts(res['sheets'])
+        
+        # --- METRIIKAT (v5.4 logiikka palautettu) ---
+        total_used_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if not getattr(p, 'is_standard', False)) / 1e6
+        total_standard_area = sum(p.w * p.h for s in res['sheets'] for p in s['panels'] if getattr(p, 'is_standard', False)) / 1e6
+        total_stock_area = (len(res['sheets']) * sw * sh) / 1e6
+        
+        order_yield_pct = (total_used_area / total_stock_area * 100) if total_stock_area > 0 else 0
+        total_yield_pct = ((total_used_area + total_standard_area) / total_stock_area * 100) if total_stock_area > 0 else 0
+        waste_pct = 100 - total_yield_pct
+
         st.divider()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Levyjä yhteensä", f"{len(res['sheets'])} kpl")
+        c2.metric("Tilausten hyöty", f"{order_yield_pct:.1f} %")
+        if total_standard_area > 0:
+            c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %", f"+{(total_yield_pct-order_yield_pct):.1f} % vakioista")
+        else:
+            c3.metric("Kokonais hyöty", f"{total_yield_pct:.1f} %")
+        c4.metric("Lopullinen hukka", f"{waste_pct:.1f} %", f"{(total_stock_area - total_used_area - total_standard_area):.3f} m²", delta_color="inverse")
+        
+        if total_standard_area > 0:
+            st.success(f"✅ Vakiokokoilla pelastettiin materiaalia: **{total_standard_area:.3f} m²**")
+        st.divider()
+
         st.download_button(label="📥 Lataa sahauslistat PDF", data=create_pdf_bytes(layouts, sw, sh), file_name="sahauslistat.pdf")
 
         for i, l in enumerate(layouts):
